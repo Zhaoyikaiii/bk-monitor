@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 """
 Tencent is pleased to support the open source community by making 蓝鲸智云 - 监控平台 (BlueKing - Monitor) available.
-Copyright (C) 2017-2021 THL A29 Limited, a Tencent company. All rights reserved.
+Copyright (C) 2017-2025 Tencent. All rights reserved.
 Licensed under the MIT License (the "License"); you may not use this file except in compliance with the License.
 You may obtain a copy of the License at http://opensource.org/licenses/MIT
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
@@ -9,9 +8,101 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 """
 
+import json
+
+import yaml
+from django import forms
 from django.contrib import admin
 
 from metadata import models
+
+
+class YamlJsonField(forms.CharField):
+    """
+    自定义表单字段：同时接受 YAML 和 JSON 输入，存储为 JSON。
+    展示时将 JSON 转为 YAML 格式，方便阅读和编辑。
+    """
+
+    widget = forms.Textarea(attrs={"rows": 10, "cols": 80, "style": "font-family: monospace;"})
+
+    def __init__(self, *args, **kwargs):
+        self.json_default = kwargs.pop("json_default", None)
+        super().__init__(*args, **kwargs)
+
+    def prepare_value(self, value):
+        """展示时将数据转为缩进 JSON 格式（避免 YAML 缩进在浏览器中被转为 &nbsp; 的问题）"""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                return value
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except Exception:
+            return str(value)
+
+    def clean(self, value):
+        value = super().clean(value)
+        if not value or not value.strip():
+            if self.json_default is not None:
+                return self.json_default()
+            return value
+
+        # 浏览器提交时可能将空格转为 HTML 实体 &nbsp; 或 Unicode U+00A0
+        # 统一替换为普通空格后再解析
+        value = value.replace("&nbsp;", " ").replace("\u00a0", " ")
+
+        # 先尝试 YAML 解析（YAML 是 JSON 的超集，所以 JSON 也能被正确解析）
+        try:
+            parsed = yaml.safe_load(value)
+        except yaml.YAMLError:
+            pass
+        else:
+            if isinstance(parsed, (dict, list)):
+                return parsed
+            # 标量值（如纯字符串/数字），尝试 JSON 解析
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, (dict, list)):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        raise forms.ValidationError("输入格式无效，请使用 YAML 或 JSON 格式。")
+
+
+class ResourceDefinitionForm(forms.ModelForm):
+    labels = YamlJsonField(label="资源标签", required=False, json_default=dict)
+    fields_def = YamlJsonField(label="字段定义列表", required=False, json_default=list)
+
+    class Meta:
+        model = models.ResourceDefinition
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 将 model 的 fields 字段映射到 fields_def 表单字段（避免与 Meta.fields 冲突）
+        if self.instance and self.instance.pk:
+            self.initial["fields_def"] = self.instance.fields
+
+    def clean(self):
+        cleaned = super().clean()
+        cleaned["fields"] = cleaned.pop("fields_def", [])
+        return cleaned
+
+    def save(self, commit=True):
+        self.instance.fields = self.cleaned_data.get("fields", [])
+        return super().save(commit=commit)
+
+
+class RelationDefinitionForm(forms.ModelForm):
+    labels = YamlJsonField(label="资源标签", required=False, json_default=dict)
+
+    class Meta:
+        model = models.RelationDefinition
+        fields = "__all__"
 
 # Register your models here.
 
@@ -68,9 +159,9 @@ class BkDataStorageAdmin(admin.ModelAdmin):
     search_fields = ("table_id", "bk_data_result_table_id")
 
 
-class CustomReportSubscriptionConfigAdmin(admin.ModelAdmin):
-    search_fields = ("bk_biz_id", "subscription_id")
-    list_display = ("bk_biz_id", "subscription_id", "config")
+class CustomReportSubscriptionAdmin(admin.ModelAdmin):
+    search_fields = ("bk_biz_id", "subscription_id", "bk_data_id")
+    list_display = ("bk_biz_id", "subscription_id", "bk_data_id", "config")
 
 
 class PingServerSubscriptionConfigAdmin(admin.ModelAdmin):
@@ -125,15 +216,26 @@ class TimeSeriesGroupAdmin(admin.ModelAdmin):
 
 
 class TimeSeriesMetricAdmin(admin.ModelAdmin):
-    list_display = ("group_id", "table_id", "field_name", "last_modify_time")
-    search_fields = ("group_id", "field_name", "last_modify_time")
-    list_filter = ("group_id", "field_name", "table_id")
+    list_display = ("group_id", "table_id", "scope_id", "field_name", "field_scope", "last_modify_time", "create_time")
+    search_fields = ("group_id", "field_name", "field_scope", "last_modify_time", "create_time")
+    list_filter = ("group_id", "field_name", "field_scope", "table_id")
+
+
+class TimeSeriesScopeAdmin(admin.ModelAdmin):
+    list_display = ("id", "group_id", "scope_name", "auto_rules", "last_modify_time")
+    search_fields = ("group_id", "scope_name")
+    list_filter = ("group_id", "scope_name")
 
 
 class ResultTableAdmin(admin.ModelAdmin):
     list_display = ("table_id", "table_name_zh", "bk_biz_id", "label", "last_modify_user", "last_modify_time")
     search_fields = ("table_id", "table_name_zh", "bk_biz_id")
     list_filter = ("bk_biz_id",)
+
+
+class ResultTableFieldAdmin(admin.ModelAdmin):
+    list_display = ("table_id", "field_name", "field_type", "tag", "description", "creator", "create_time")
+    search_fields = ("table_id", "field_name")
 
 
 class ResultTableOptionAdmin(admin.ModelAdmin):
@@ -156,6 +258,12 @@ class ClusterInfoAdmin(admin.ModelAdmin):
     list_filter = ("cluster_type", "registered_system")
 
 
+class SpaceRelatedStorageInfoAdmin(admin.ModelAdmin):
+    list_display = ("space_type_id", "space_id", "storage_type", "cluster_id")
+    search_fields = ("cluster_id", "space_id")
+    list_filter = ("cluster_id", "storage_type")
+
+
 class KafkaTopicInfoAdmin(admin.ModelAdmin):
     list_display = ("bk_data_id", "topic", "partition")
     search_fields = ("topic",)
@@ -174,39 +282,6 @@ class DataSourceResultTableAdmin(admin.ModelAdmin):
 class ReplaceConfigAdmin(admin.ModelAdmin):
     list_display = ("rule_name", "is_common", "replace_type", "source_name", "target_name")
     search_fields = ("rule_name", "source_name", "target_name")
-
-
-class DownsampledDatabaseAdmin(admin.ModelAdmin):
-    list_display = ("database", "tag_name", "tag_value", "enable", "create_time", "last_modify_time")
-    search_fields = ("database", "tag_name")
-    list_filter = ("database", "tag_name", "enable")
-
-
-class DownsampledRetentionPoliciesAdmin(admin.ModelAdmin):
-    list_display = ("database", "name", "resolution", "duration", "replication", "create_time", "last_modify_time")
-    search_fields = ("database", "name")
-    list_filter = ("database", "name")
-
-
-class DownsampledContinuousQueriesAdmin(admin.ModelAdmin):
-    list_display = (
-        "database",
-        "measurement",
-        "fields",
-        "aggregations",
-        "source_rp",
-        "target_rp",
-        "create_time",
-        "last_modify_time",
-    )
-    search_fields = ("database", "measurement", "fields", "target_rp")
-    list_filter = ("database", "measurement", "source_rp", "target_rp")
-
-
-class DownsampleByDateFlowAdmin(admin.ModelAdmin):
-    list_display = ("table_id", "bk_biz_id", "project_id", "flow_id", "status", "create_time")
-    search_fields = ("table_id", "status", "flow_id")
-    list_filter = ("status", "flow_id")
 
 
 class InfluxDBProxyStorageAdmin(admin.ModelAdmin):
@@ -251,6 +326,33 @@ class BkAppSpaceRecordAdmin(admin.ModelAdmin):
     list_filter = ("bk_app_code", "space_uid")
 
 
+class ResourceDefinitionAdmin(admin.ModelAdmin):
+    form = ResourceDefinitionForm
+    list_display = ("namespace", "name", "uid", "generation", "labels", "create_time", "update_time")
+    search_fields = ("namespace", "name")
+    list_filter = ("namespace",)
+    exclude = ("fields",)  # 使用 fields_def 替代，避免字段名冲突
+
+
+class RelationDefinitionAdmin(admin.ModelAdmin):
+    form = RelationDefinitionForm
+    list_display = (
+        "namespace",
+        "name",
+        "from_resource",
+        "to_resource",
+        "category",
+        "is_directional",
+        "is_belongs_to",
+        "uid",
+        "generation",
+        "create_time",
+        "update_time",
+    )
+    search_fields = ("namespace", "name", "from_resource", "to_resource")
+    list_filter = ("namespace", "category", "is_directional", "is_belongs_to")
+
+
 admin.site.register(models.InfluxDBClusterInfo, InfluxdbClusterAdmin)
 admin.site.register(models.InfluxDBHostInfo, InfluxdbHostAdmin)
 admin.site.register(models.InfluxDBStorage, InfluxDBStorageAdmin)
@@ -261,21 +363,20 @@ admin.site.register(models.ESStorage, ESStorageAdmin)
 admin.site.register(models.EventGroup, EventGroupAdmin)
 admin.site.register(models.TimeSeriesGroup, TimeSeriesGroupAdmin)
 admin.site.register(models.TimeSeriesMetric, TimeSeriesMetricAdmin)
-admin.site.register(models.CustomReportSubscriptionConfig, CustomReportSubscriptionConfigAdmin)
+admin.site.register(models.TimeSeriesScope, TimeSeriesScopeAdmin)
+admin.site.register(models.CustomReportSubscription, CustomReportSubscriptionAdmin)
 admin.site.register(models.PingServerSubscriptionConfig, PingServerSubscriptionConfigAdmin)
 admin.site.register(models.ClusterInfo, ClusterInfoAdmin)
+admin.site.register(models.SpaceRelatedStorageInfo, SpaceRelatedStorageInfoAdmin)
 admin.site.register(models.KafkaTopicInfo, KafkaTopicInfoAdmin)
 admin.site.register(models.DataSource, DataSourceAdmin)
 admin.site.register(models.DataSourceOption, DataSourceOptionAdmin)
 admin.site.register(models.DataSourceResultTable, DataSourceResultTableAdmin)
 admin.site.register(models.InfluxDBTagInfo, InfluxdbTagAdmin)
 admin.site.register(models.ResultTable, ResultTableAdmin)
+admin.site.register(models.ResultTableField, ResultTableFieldAdmin)
 admin.site.register(models.ResultTableOption, ResultTableOptionAdmin)
 admin.site.register(models.ReplaceConfig, ReplaceConfigAdmin)
-admin.site.register(models.DownsampledDatabase, DownsampledDatabaseAdmin)
-admin.site.register(models.DownsampledRetentionPolicies, DownsampledRetentionPoliciesAdmin)
-admin.site.register(models.DownsampledContinuousQueries, DownsampledContinuousQueriesAdmin)
-admin.site.register(models.DownsampleByDateFlow, DownsampleByDateFlowAdmin)
 admin.site.register(models.InfluxDBProxyStorage, InfluxDBProxyStorageAdmin)
 admin.site.register(models.AccessVMRecord, AccessVMRecordAdmin)
 admin.site.register(models.BCSClusterInfo, BCSClusterInfoAdmin)
@@ -283,3 +384,5 @@ admin.site.register(models.DataLink, DataLinkAdmin)
 admin.site.register(models.BkBaseResultTable, BkBaseResultTableAdmin)
 admin.site.register(models.StorageClusterRecord, StorageClusterRecordAdmin)
 admin.site.register(models.BkAppSpaceRecord, BkAppSpaceRecordAdmin)
+admin.site.register(models.ResourceDefinition, ResourceDefinitionAdmin)
+admin.site.register(models.RelationDefinition, RelationDefinitionAdmin)
