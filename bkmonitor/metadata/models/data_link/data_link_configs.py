@@ -1380,6 +1380,10 @@ class SurrealDBBindingConfig(DataLinkResourceConfigBase):
             raise ValueError(f"vertices 必须为列表类型，当前类型: {type(self.vertices).__name__}")
         if not isinstance(self.relations, list):
             raise ValueError(f"relations 必须为列表类型，当前类型: {type(self.relations).__name__}")
+        if not self.vertices:
+            raise ValueError("vertices 必须为非空列表")
+        if not self.relations:
+            raise ValueError("relations 必须为非空列表")
 
         for idx, vertex in enumerate(self.vertices):
             if not isinstance(vertex, dict):

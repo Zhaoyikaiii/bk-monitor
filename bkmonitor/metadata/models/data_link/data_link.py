@@ -568,6 +568,7 @@ class DataLink(models.Model):
         table_id: str,
         storage_cluster_name: str = "",
         write_mode: str | None = None,
+        persist_write_mode: bool = True,
     ) -> list[dict[str, Any]]:
         """
         生成图关系时序链路配置。
@@ -627,9 +628,21 @@ class DataLink(models.Model):
         queried_vertices, queried_relations = (
             EntityMeta.auto_query_graph_definitions(bk_biz_id=bk_biz_id) if should_write_surrealdb else ([], [])
         )
-        if not should_write_surrealdb and existed_graph_binding:
-            queried_vertices = existed_graph_binding.vertices
-            queried_relations = existed_graph_binding.relations
+        if should_write_surrealdb and (not queried_vertices or not queried_relations):
+            raise ValueError(
+                "compose_graph_relation_time_series_configs: graph definitions are empty, "
+                "SurrealDB write requires non-empty vertices and relations"
+            )
+        graph_vertices = (
+            queried_vertices
+            if should_write_surrealdb
+            else (existed_graph_binding.vertices if existed_graph_binding else [])
+        )
+        graph_relations = (
+            queried_relations
+            if should_write_surrealdb
+            else (existed_graph_binding.relations if existed_graph_binding else [])
+        )
         vm_cluster_name = storage_cluster_name or (existed_graph_binding.vm_cluster_name if existed_graph_binding else "")
         table_type = existed_graph_binding.table_type if existed_graph_binding else "temporary"
         bkbase_result_table_name = (
@@ -661,16 +674,16 @@ class DataLink(models.Model):
             "surrealdb_binding_name": surrealdb_binding_name,
             "graph_databus_name": graph_databus_name,
             "table_type": table_type,
-            "vertices": queried_vertices,
-            "relations": queried_relations,
+            "vertices": graph_vertices,
+            "relations": graph_relations,
         }
         cleanup_graph_binding = existed_graph_binding
         cleanup_write_mode = (
             effective_write_mode
-            if existed_graph_binding and existed_graph_binding.write_mode != effective_write_mode
+            if persist_write_mode and existed_graph_binding and existed_graph_binding.write_mode != effective_write_mode
             else None
         )
-        graph_binding_defaults["write_mode"] = effective_write_mode
+        graph_binding_model_defaults = {**graph_binding_defaults, "write_mode": effective_write_mode}
         graph_binding_lookup = {
             "name": existed_graph_binding.name if existed_graph_binding else self.data_link_name,
             "data_link_name": self.data_link_name,
@@ -678,20 +691,24 @@ class DataLink(models.Model):
             "bk_biz_id": bk_biz_id,
             "bk_tenant_id": self.bk_tenant_id,
         }
+        graph_binding_ins = GraphRelationBindingConfig(
+            **graph_binding_lookup,
+            **graph_binding_model_defaults,
+            status=DataLinkResourceStatus.INITIALIZING.value,
+        )
+        if existed_graph_binding:
+            graph_binding_ins.pk = existed_graph_binding.pk
+
+        graph_binding_persist_defaults = graph_binding_model_defaults if persist_write_mode else graph_binding_defaults
         graph_binding_status_defaults = {
-            **graph_binding_defaults,
+            **graph_binding_persist_defaults,
             "status": DataLinkResourceStatus.INITIALIZING.value,
         }
         if getattr(self, "_defer_graph_binding_update_after_apply", False):
-            graph_binding_ins = GraphRelationBindingConfig(
-                **graph_binding_lookup,
-                **graph_binding_status_defaults,
-            )
-            if existed_graph_binding:
-                graph_binding_ins.pk = existed_graph_binding.pk
-            self._graph_binding_update_after_apply = (graph_binding_lookup, graph_binding_defaults)
+            if persist_write_mode:
+                self._graph_binding_update_after_apply = (graph_binding_lookup, graph_binding_model_defaults)
         else:
-            graph_binding_ins, _ = GraphRelationBindingConfig.objects.update_or_create(
+            GraphRelationBindingConfig.objects.update_or_create(
                 **graph_binding_lookup,
                 defaults=graph_binding_status_defaults,
             )
@@ -1910,6 +1927,10 @@ class DataLink(models.Model):
         """
         from metadata.models.bkdata.result_table import BkBaseResultTable
 
+        if self.data_link_strategy == self.GRAPH_RELATION_TIME_SERIES:
+            self._clear_graph_relation_apply_state()
+        persist_graph_write_mode = kwargs.pop("persist_graph_write_mode", True)
+
         storage_type = self.STORAGE_TYPE_MAP[self.data_link_strategy]
         if self.data_link_strategy == self.GRAPH_RELATION_TIME_SERIES:
             storage_type = self._resolve_graph_relation_storage_type(kwargs.get("write_mode"))
@@ -1934,6 +1955,7 @@ class DataLink(models.Model):
             should_update_bkbase_rt_storage_type = (
                 self.data_link_strategy == self.GRAPH_RELATION_TIME_SERIES
                 and bkbase_rt_record.storage_type != storage_type
+                and persist_graph_write_mode
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.error(
@@ -1953,6 +1975,7 @@ class DataLink(models.Model):
         )
 
         if self.data_link_strategy == self.GRAPH_RELATION_TIME_SERIES:
+            kwargs["persist_write_mode"] = persist_graph_write_mode
             return self._apply_graph_relation_data_link_in_transaction(
                 args=args,
                 kwargs=kwargs,
@@ -1989,9 +2012,13 @@ class DataLink(models.Model):
                 self.data_link_name,
                 e,
             )
+            if self.data_link_strategy == self.GRAPH_RELATION_TIME_SERIES:
+                self._clear_graph_relation_apply_state()
             raise
         except Exception as e:  # pylint: disable=broad-except
             logger.error("apply_data_link: data_link_name->[%s] compose config error->[%s]", self.data_link_name, e)
+            if self.data_link_strategy == self.GRAPH_RELATION_TIME_SERIES:
+                self._clear_graph_relation_apply_state()
             raise e
 
         configs = self.merge_existing_component_configs(configs)

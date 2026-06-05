@@ -381,6 +381,114 @@ def test_sync_bkbase_v4_components_updates_empty_surrealdb_definitions(mocker):
 
 
 @pytest.mark.django_db(databases="__all__")
+def test_sync_bkbase_v4_storage_bindings_fill_table_id_from_result_table(mocker):
+    models.ResultTableConfig.objects.create(
+        name="graph_vm_rt",
+        namespace="bkmonitor",
+        bk_tenant_id="system",
+        bk_biz_id=1001,
+        table_id="1001_bkmonitor_time_series_60010.__default__",
+    )
+    models.ResultTableConfig.objects.create(
+        name="graph_vm_rt_graph",
+        namespace="bkmonitor",
+        bk_tenant_id="system",
+        bk_biz_id=1001,
+        table_id="1001_bkmonitor_time_series_60010.__default__",
+    )
+    mocker.patch(
+        "metadata.task.bkbase.api.bkdata.list_data_link",
+        return_value=[
+            {
+                "metadata": {
+                    "name": "graph_vm_rt",
+                    "labels": {"bk_biz_id": "1001"},
+                    "annotations": {},
+                },
+                "spec": {
+                    "storage": {"name": "vm-default"},
+                    "data": {"name": "graph_vm_rt"},
+                },
+                "status": {"phase": "OK"},
+            }
+        ],
+    )
+
+    _sync_bkbase_v4_datalink_components(
+        bk_tenant_id="system",
+        namespace="bkmonitor",
+        kind=DataLinkKind.VMSTORAGEBINDING.value,
+    )
+
+    vm_binding = models.VMStorageBindingConfig.objects.get(name="graph_vm_rt")
+    assert vm_binding.table_id == "1001_bkmonitor_time_series_60010.__default__"
+
+    mocker.patch(
+        "metadata.task.bkbase.api.bkdata.list_data_link",
+        return_value=[
+            {
+                "metadata": {
+                    "name": "graph_vm_rt_graph",
+                    "labels": {"bk_biz_id": "1001"},
+                    "annotations": {},
+                },
+                "spec": {
+                    "storage": {"name": "surreal-default"},
+                    "data": {"name": "graph_vm_rt_graph"},
+                    "table_type": "normal",
+                    "vertices": [{"name": "pod", "id_fields": ["pod_name"]}],
+                    "relations": [{"name": "pod_node", "from": "pod", "to": "node"}],
+                },
+                "status": {"phase": "OK"},
+            }
+        ],
+    )
+
+    _sync_bkbase_v4_datalink_components(
+        bk_tenant_id="system",
+        namespace="bkmonitor",
+        kind=DataLinkKind.SURREALDBBINDING.value,
+    )
+
+    surrealdb_binding = SurrealDBBindingConfig.objects.get(name="graph_vm_rt_graph")
+    assert surrealdb_binding.table_id == "1001_bkmonitor_time_series_60010.__default__"
+
+
+@pytest.mark.django_db(databases="__all__")
+def test_sync_bkbase_v4_components_ignores_falsy_non_surrealdb_fields(mocker):
+    models.DataIdConfig.objects.create(
+        name="metric_data",
+        namespace="bkmonitor",
+        bk_tenant_id="system",
+        data_link_name="metric_link",
+        bk_biz_id=1001,
+        bk_data_id=60010,
+    )
+    mocker.patch(
+        "metadata.task.bkbase.api.bkdata.list_data_link",
+        return_value=[
+            {
+                "metadata": {
+                    "name": "metric_data",
+                    "labels": {"bk_biz_id": "1001"},
+                    "annotations": {},
+                },
+                "spec": {"bizId": 1001, "eventType": "metric", "maintainers": ["admin"]},
+                "status": {"phase": "OK"},
+            }
+        ],
+    )
+
+    _sync_bkbase_v4_datalink_components(
+        bk_tenant_id="system",
+        namespace="bkmonitor",
+        kind=DataLinkKind.DATAID.value,
+    )
+
+    assert models.DataIdConfig.objects.get(name="metric_data").bk_data_id == 60010
+
+
+@pytest.mark.django_db(databases="__all__")
 def test_sync_bkbase_clusters(create_or_delete_records):
     mock_es_data = [
         {
@@ -431,8 +539,39 @@ def test_sync_bkbase_clusters(create_or_delete_records):
             },
         }
     ]
+
+    mock_surrealdb_data = [
+        {
+            "kind": "SurrealDB",
+            "metadata": {
+                "namespace": "bkmonitor",
+                "name": "surrealdb_default",
+            },
+            "spec": {
+                "host": "surrealdb.example.com",
+                "port": 8000,
+                "user": "surreal_user",
+                "password": "surreal_password",
+                "version": "2.3.2",
+            },
+        }
+    ]
+
+    def list_data_link_side_effect(*args, **kwargs):
+        kind = kwargs["kind"]
+        namespace = kwargs["namespace"]
+        if kind == "elasticsearchs" and namespace == "bklog":
+            return mock_es_data
+        if kind == "vmstorages" and namespace == "bkmonitor":
+            return mock_vm_data
+        if kind == "surrealdbs" and namespace == "bkmonitor":
+            return mock_surrealdb_data
+        if kind == "dorises" and namespace == "bklog":
+            return mock_doris_data
+        return []
+
     with patch("core.drf_resource.api.bkdata.list_data_link") as mock_api:
-        mock_api.side_effect = [mock_es_data, mock_vm_data, mock_doris_data]
+        mock_api.side_effect = list_data_link_side_effect
         sync_all_bkbase_cluster_info()
 
         es_cluster = models.ClusterInfo.objects.get(domain_name="es.example.com")
@@ -449,6 +588,12 @@ def test_sync_bkbase_clusters(create_or_delete_records):
         assert doris_cluster.username == "testuser"
         assert doris_cluster.password == "testpwd"
         assert doris_cluster.cluster_type == models.ClusterInfo.TYPE_DORIS
+
+        surrealdb_cluster = models.ClusterInfo.objects.get(domain_name="surrealdb.example.com")
+        assert surrealdb_cluster.username == "surreal_user"
+        assert surrealdb_cluster.password == "surreal_password"
+        assert surrealdb_cluster.version == "2.3.2"
+        assert surrealdb_cluster.cluster_type == models.ClusterInfo.TYPE_SURREALDB
 
 
 # 计算平台Meta接口的返回值(这里只Mock了监控平台需要关注的部分)
