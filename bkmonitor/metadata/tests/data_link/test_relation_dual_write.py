@@ -598,7 +598,7 @@ def test_sync_graph_definition_downgrades_dual_write_empty_definitions_to_vm(moc
     assert result["failed"] == 0
     mock_apply.assert_called_once()
     assert mock_apply.call_args.kwargs["write_mode"] == GraphRelationBindingConfig.WRITE_MODE_VM
-    assert mock_apply.call_args.kwargs["persist_graph_write_mode"] is False
+    assert mock_apply.call_args.kwargs["persist_graph_write_mode"] is True
 
 
 def test_sync_graph_definition_scopes_datalink_lookup_to_graph_strategy(mocker):
@@ -696,7 +696,7 @@ def test_sync_graph_definition_marks_binding_failed_when_apply_raises(mocker):
             [{"name": "service_pod", "from": "service", "to": "pod"}],
         ),
     )
-    mocker.patch.object(DataLink, "apply_data_link", side_effect=ValueError("apply failed"))
+    mock_apply = mocker.patch.object(DataLink, "apply_data_link", side_effect=ValueError("apply failed"))
 
     from metadata.models.entity_relation import NAMESPACE_ALL
     from metadata.task.sync_cmdb_relation import sync_graph_definition_to_bkbase
@@ -706,6 +706,7 @@ def test_sync_graph_definition_marks_binding_failed_when_apply_raises(mocker):
     assert result["matched"] == 1
     assert result["applied"] == 0
     assert result["failed"] == 1
+    mock_apply.assert_called_once()
     assert result["failures"][0]["error"] == "apply failed"
     assert GraphRelationBindingConfig.objects.get(data_link_name=data_link.data_link_name).status == DataLinkResourceStatus.FAILED.value
 
@@ -791,14 +792,16 @@ def test_sync_graph_definition_dry_run_does_not_mark_apply_exception_failed(mock
         "metadata.task.sync_cmdb_relation.EntityMeta.auto_query_graph_definitions",
         return_value=([{"name": "service", "id_fields": ["service_name"]}], [{"name": "service_pod"}]),
     )
-    mocker.patch.object(DataLink, "apply_data_link", side_effect=ValueError("apply failed"))
+    mock_apply = mocker.patch.object(DataLink, "apply_data_link", side_effect=ValueError("apply failed"))
 
     from metadata.models.entity_relation import NAMESPACE_ALL
     from metadata.task.sync_cmdb_relation import sync_graph_definition_to_bkbase
 
     result = sync_graph_definition_to_bkbase(namespace=NAMESPACE_ALL, action="apply", dry_run=True)
 
-    assert result["failed"] == 1
+    assert result["applied"] == 1
+    assert result["failed"] == 0
+    mock_apply.assert_not_called()
     graph_binding = GraphRelationBindingConfig.objects.get(data_link_name=data_link.data_link_name)
     assert graph_binding.status == DataLinkResourceStatus.OK.value
 

@@ -1226,11 +1226,12 @@ def rebuild_databus_relation(databus: DataBusConfig, dry_run: bool = True) -> Da
                 "namespace": databus.namespace,
                 "name": data_link_name,
             }
+            resolved_graph_table_id = table_ids[0] if table_ids else ""
             existing_graph_binding = GraphRelationBindingConfig.objects.filter(
                 bk_tenant_id=databus.bk_tenant_id,
                 namespace=databus.namespace,
                 data_link_name="",
-                table_id=resolved_table_id,
+                table_id=resolved_graph_table_id,
             ).first()
             if existing_graph_binding:
                 graph_binding_lookup = {"pk": existing_graph_binding.pk}

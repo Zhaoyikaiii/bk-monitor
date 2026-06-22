@@ -237,7 +237,6 @@ def test_enable_relation_graph_link_applies_vm_fallback_when_existing_config_unc
         relations=relations,
         write_mode=models.GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
         status=DataLinkResourceStatus.OK.value,
-        component_status=DataLinkResourceStatus.OK.value,
     )
     mocker.patch("metadata.task.sync_cmdb_relation.EntityMeta.auto_query_graph_definitions", return_value=([], []))
     mock_apply = mocker.patch("metadata.models.data_link.data_link.DataLink.apply_data_link", return_value=None)

@@ -86,7 +86,8 @@ def test_enable_relation_surrealdb_dual_write_creates_graph_relation_datalink(mo
 
     enable_relation_surrealdb_dual_write(data_source, "system", 2)
 
-    data_link = DataLink.objects.get(data_link_name="2_bkcc_built_in_time_series_graph_relation")
+    data_link_name = compose_bkdata_table_id("system_2_bkcc_built_in_time_series_graph_relation")
+    data_link = DataLink.objects.get(data_link_name=data_link_name)
     assert data_link.data_link_strategy == DataLink.GRAPH_RELATION_TIME_SERIES
     assert data_link.table_ids == ["2_bkcc_built_in_time_series.__default__"]
     binding = GraphRelationBindingConfig.objects.get(data_link_name=data_link.data_link_name)
