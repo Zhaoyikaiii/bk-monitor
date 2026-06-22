@@ -6593,6 +6593,86 @@ def test_graph_relation_binding_delete_uses_distinct_child_component_names(mocke
 
 
 @pytest.mark.django_db(databases="__all__")
+def test_graph_relation_transition_to_vm_keeps_vm_storage_cluster_record(create_or_delete_records, mocker):
+    table_id = "2_bkcc_built_in_time_series.__default__"
+    graph_binding = GraphRelationBindingConfig.objects.create(
+        name="graph_binding",
+        data_link_name="graph_transition_keeps_vm_record",
+        namespace="bkmonitor",
+        bk_tenant_id="system",
+        bk_biz_id=2,
+        table_id=table_id,
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
+        bkbase_result_table_name="vm_rt",
+        graph_result_table_name="graph_rt",
+        vm_storage_binding_name="vm_binding",
+        vm_databus_name="vm_databus",
+        surrealdb_binding_name="surreal_binding",
+        graph_databus_name="graph_databus",
+    )
+    for name, model in (
+        ("graph_rt", ResultTableConfig),
+        ("surreal_binding", SurrealDBBindingConfig),
+        ("graph_databus", GraphDataBusConfig),
+    ):
+        defaults = {
+            "name": name,
+            "data_link_name": graph_binding.data_link_name,
+            "namespace": graph_binding.namespace,
+            "bk_tenant_id": graph_binding.bk_tenant_id,
+            "bk_biz_id": graph_binding.bk_biz_id,
+        }
+        if model is SurrealDBBindingConfig:
+            defaults.update(
+                {
+                    "bkbase_result_table_name": "graph_rt",
+                    "surrealdb_cluster_name": "surreal-default",
+                    "table_id": table_id,
+                }
+            )
+        elif model is GraphDataBusConfig:
+            defaults.update(
+                {
+                    "data_id_name": "data",
+                    "bk_data_id": 50003,
+                    "sink_names": [f"{DataLinkKind.SURREALDBBINDING.value}:surreal_binding"],
+                }
+            )
+        model.objects.create(**defaults)
+    models.SurrealDBStorage.objects.create(
+        table_id=table_id,
+        bk_tenant_id="system",
+        table_type="temporary",
+        vertices=[],
+        relations=[],
+        storage_cluster_id=300001,
+    )
+    models.StorageClusterRecord.objects.create(
+        table_id=table_id,
+        bk_tenant_id="system",
+        cluster_id=300001,
+        creator="test",
+    )
+    models.StorageClusterRecord.objects.create(
+        table_id=table_id,
+        bk_tenant_id="system",
+        cluster_id=100001,
+        creator="test",
+    )
+    mocker.patch("metadata.models.data_link.data_link_configs.api.bkdata.delete_data_link")
+
+    graph_binding.transition_write_mode(GraphRelationBindingConfig.WRITE_MODE_VM)
+
+    assert not models.SurrealDBStorage.objects.filter(table_id=table_id, bk_tenant_id="system").exists()
+    assert not models.StorageClusterRecord.objects.filter(
+        table_id=table_id, bk_tenant_id="system", cluster_id=300001
+    ).exists()
+    assert models.StorageClusterRecord.objects.filter(
+        table_id=table_id, bk_tenant_id="system", cluster_id=100001
+    ).exists()
+
+
+@pytest.mark.django_db(databases="__all__")
 def test_graph_relation_apply_failure_keeps_existing_write_mode(create_or_delete_records, mocker):
     datalink, ds, rt = _prepare_bk_standard_v2_datalink()
     datalink.data_link_strategy = DataLink.GRAPH_RELATION_TIME_SERIES

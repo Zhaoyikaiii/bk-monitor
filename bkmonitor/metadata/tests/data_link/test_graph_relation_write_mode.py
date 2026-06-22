@@ -200,10 +200,10 @@ def test_enable_relation_surrealdb_dual_write_downgrades_empty_definitions_to_vm
     enable_relation_surrealdb_dual_write(data_source, "system", 6)
 
     binding = GraphRelationBindingConfig.objects.get(data_link_name="6_bkcc_built_in_time_series_graph_relation")
-    assert binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM
+    assert binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
     mock_apply.assert_called_once()
     assert mock_apply.call_args.kwargs["write_mode"] == GraphRelationBindingConfig.WRITE_MODE_VM
-    assert mock_apply.call_args.kwargs["persist_graph_write_mode"] is True
+    assert mock_apply.call_args.kwargs["persist_graph_write_mode"] is False
 
 
 def test_enable_relation_surrealdb_dual_write_persists_write_mode_transition(mocker):

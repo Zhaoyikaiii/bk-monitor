@@ -207,7 +207,7 @@ def sync_graph_definition_to_bkbase(
                         table_id=table_id,
                         storage_cluster_name=graph_binding.vm_cluster_name,
                         write_mode=GraphRelationBindingConfig.WRITE_MODE_VM,
-                        persist_graph_write_mode=True,
+                        persist_graph_write_mode=False,
                     )
                     result["applied"] += 1
                     logger.warning(
@@ -218,8 +218,9 @@ def sync_graph_definition_to_bkbase(
                     )
                     continue
 
-                graph_binding.status = DataLinkResourceStatus.FAILED.value
-                graph_binding.save(update_fields=["status"])
+                if not dry_run:
+                    graph_binding.status = DataLinkResourceStatus.FAILED.value
+                    graph_binding.save(update_fields=["status"])
                 result["failed"] += 1
                 result["failures"].append(
                     {

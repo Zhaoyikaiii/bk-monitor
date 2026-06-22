@@ -291,13 +291,13 @@ class DataLink(models.Model):
             table_id__in=table_ids,
             bk_tenant_id=self.bk_tenant_id,
         )
-        cluster_ids = list(storages.values_list("storage_cluster_id", flat=True))
+        storage_cluster_ids = list(storages.values_list("storage_cluster_id", flat=True))
         storages.delete()
-        if cluster_ids:
+        if storage_cluster_ids:
             StorageClusterRecord.objects.filter(
                 table_id__in=table_ids,
                 bk_tenant_id=self.bk_tenant_id,
-                cluster_id__in=cluster_ids,
+                cluster_id__in=storage_cluster_ids,
             ).delete()
 
     def get_related_component_classes(
