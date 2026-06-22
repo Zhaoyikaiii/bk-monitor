@@ -3624,7 +3624,7 @@ def test_rebuild_graph_relation_merges_siblings_without_prefilled_table_id():
             bk_tenant_id="system",
             bk_biz_id=1001,
             data_id_name=data_id_name,
-            bk_data_id=60204,
+            bk_data_id=0,
             sink_names=[f"{sink_kind}:{sink_name}"],
         )
 
@@ -6303,7 +6303,14 @@ def test_delete_graph_relation_data_link_falls_back_when_binding_missing(mocker)
     assert not SurrealDBBindingConfig.objects.filter(data_link_name=data_link.data_link_name).exists()
     assert not DataBusConfig.objects.filter(data_link_name=data_link.data_link_name).exists()
     assert not models.SurrealDBStorage.objects.filter(table_id="2_bkcc_built_in_time_series.__default__").exists()
-    assert not models.StorageClusterRecord.objects.filter(table_id="2_bkcc_built_in_time_series.__default__").exists()
+    assert not models.StorageClusterRecord.objects.filter(
+        table_id="2_bkcc_built_in_time_series.__default__",
+        cluster_id=300001,
+    ).exists()
+    assert models.StorageClusterRecord.objects.filter(
+        table_id="2_bkcc_built_in_time_series.__default__",
+        cluster_id=300002,
+    ).exists()
     assert not DataLink.objects.filter(data_link_name=data_link.data_link_name).exists()
 
 
@@ -6376,6 +6383,12 @@ def test_graph_relation_binding_delete_uses_distinct_child_component_names(mocke
         cluster_id=300001,
         creator="test",
     )
+    models.StorageClusterRecord.objects.create(
+        table_id=table_id,
+        bk_tenant_id="system",
+        cluster_id=400001,
+        creator="test",
+    )
     mock_delete = mocker.patch("metadata.models.data_link.data_link_configs.api.bkdata.delete_data_link")
 
     graph_binding.delete_config()
@@ -6388,7 +6401,8 @@ def test_graph_relation_binding_delete_uses_distinct_child_component_names(mocke
     assert not DataBusConfig.objects.filter(data_link_name=data_link_name).exists()
     assert not GraphDataBusConfig.objects.filter(data_link_name=data_link_name).exists()
     assert not models.SurrealDBStorage.objects.filter(table_id=table_id).exists()
-    assert not models.StorageClusterRecord.objects.filter(table_id=table_id).exists()
+    assert not models.StorageClusterRecord.objects.filter(table_id=table_id, cluster_id=300001).exists()
+    assert models.StorageClusterRecord.objects.filter(table_id=table_id, cluster_id=400001).exists()
 
 
 @pytest.mark.django_db(databases="__all__")

@@ -755,8 +755,14 @@ class GraphRelationBindingConfig(DataLinkResourceConfigBase):
         from metadata.models.storage import StorageClusterRecord, SurrealDBStorage
 
         storages = SurrealDBStorage.objects.filter(table_id=self.table_id, bk_tenant_id=self.bk_tenant_id)
+        cluster_ids = list(storages.values_list("storage_cluster_id", flat=True))
         storages.delete()
-        StorageClusterRecord.objects.filter(table_id=self.table_id, bk_tenant_id=self.bk_tenant_id).delete()
+        if cluster_ids:
+            StorageClusterRecord.objects.filter(
+                table_id=self.table_id,
+                bk_tenant_id=self.bk_tenant_id,
+                cluster_id__in=cluster_ids,
+            ).delete()
 
     def transition_write_mode(self, new_write_mode: str | None) -> None:
         normalized_new_write_mode = self.normalize_write_mode(new_write_mode)

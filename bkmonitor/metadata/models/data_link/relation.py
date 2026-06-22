@@ -140,6 +140,7 @@ def _load_sink_instances(
 def _merge_graph_dual_write_sibling_databus(
     databus: DataBusConfig,
     sink_instances: list[DataLinkResourceConfigBase],
+    resolved_bk_data_id: int | None = None,
 ) -> tuple[list[DataBusConfig], list[DataLinkResourceConfigBase]]:
     def graph_result_table_group_key(rt_name: str) -> str:
         if rt_name.endswith("_graph"):
@@ -162,9 +163,10 @@ def _merge_graph_dual_write_sibling_databus(
                 name__in=rt_names,
             )
         }
+        fallback_bk_data_id = resolved_bk_data_id or databus.bk_data_id
         data_source_result_table_ids = list(
             DataSourceResultTable.objects.filter(
-                bk_data_id=databus.bk_data_id,
+                bk_data_id=fallback_bk_data_id,
                 bk_tenant_id=databus.bk_tenant_id,
             )
             .order_by()
@@ -198,10 +200,13 @@ def _merge_graph_dual_write_sibling_databus(
     if not current_keys:
         return [databus], sink_instances
 
+    candidate_bk_data_ids = [databus.bk_data_id]
+    if resolved_bk_data_id and resolved_bk_data_id not in candidate_bk_data_ids:
+        candidate_bk_data_ids.append(resolved_bk_data_id)
     candidate_databuses = DataBusConfig.objects.filter(
         bk_tenant_id=databus.bk_tenant_id,
         namespace=databus.namespace,
-        bk_data_id=databus.bk_data_id,
+        bk_data_id__in=candidate_bk_data_ids,
         data_id_name=databus.data_id_name,
         data_link_name="",
     ).exclude(id=databus.id)
@@ -928,7 +933,11 @@ def rebuild_databus_relation(databus: DataBusConfig, dry_run: bool = True) -> Da
     sink_instances = _load_sink_instances(databus, sink_map)
     if sink_instances is None:
         return None
-    databus_instances, sink_instances = _merge_graph_dual_write_sibling_databus(databus, sink_instances)
+    databus_instances, sink_instances = _merge_graph_dual_write_sibling_databus(
+        databus,
+        sink_instances,
+        resolved_bk_data_id=resolved_bk_data_id,
+    )
     sink_map = {}
     for instance in sink_instances:
         sink_map.setdefault(instance.kind, []).append(instance.name)
