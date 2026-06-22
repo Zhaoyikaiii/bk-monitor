@@ -838,7 +838,6 @@ def _refresh_data_link_status(bkbase_rt_record: BkBaseResultTable):
         components = data_link_ins.get_related_component_classes()
     else:
         components = models.DataLink.STRATEGY_RELATED_COMPONENTS.get(data_link_strategy) or []
-    components = [component for component in components if component is not models.GraphRelationBindingConfig]
     all_components_ok = True
     refreshed_component_keys: set[tuple[str, str, str]] = set()
 

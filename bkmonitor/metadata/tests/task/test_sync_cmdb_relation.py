@@ -144,6 +144,38 @@ def test_sync_relation_redis_data(create_and_delete_records):
         assert {call_args.args[0].bk_data_id for call_args in mock_refresh_consul.call_args_list} == {50010, 50011}
 
 
+@pytest.mark.django_db(databases="__all__")
+def test_sync_relation_redis_data_uses_existing_time_series_group_token(create_and_delete_records):
+    models.TimeSeriesGroup.objects.create(
+        bk_data_id=50010,
+        bk_biz_id=2,
+        time_series_group_name="2_bkcc_built_in_time_series",
+        table_id="2_bkcc_built_in_time_series.__default__",
+        label=models.Label.RESULT_TABLE_LABEL_OTHER,
+        token="group-token",
+        creator="system",
+        last_modify_user="system",
+    )
+    redis_data = {b"bkcc__2": b'{"token":"testtokenxxxxxx","modifyTime":"1733132051"}'}
+    with (
+        patch("metadata.utils.redis_tools.RedisTools.hgetall", return_value=redis_data),
+        patch("metadata.utils.redis_tools.RedisTools.hset_to_redis", return_value=0) as mock_hset_to_redis,
+        patch("time.time", return_value=1733198214),
+        patch("metadata.task.sync_cmdb_relation.metrics.report_all", return_value=None),
+        patch("metadata.models.DataSource.refresh_consul_config", autospec=True) as mock_refresh_consul,
+    ):
+        sync_relation_redis_data()
+
+    builtin_ds = models.DataSource.objects.get(bk_data_id=50010)
+    assert builtin_ds.token == "group-token"
+    mock_hset_to_redis.assert_called_once_with(
+        f"{settings.BUILTIN_DATA_RT_REDIS_KEY}",
+        "bkcc__2",
+        '{"token":"group-token","modifyTime":"1733198214"}',
+    )
+    assert [call_args.args[0].bk_data_id for call_args in mock_refresh_consul.call_args_list] == [50010]
+
+
 def _create_relation_graph_source(bk_data_id: int, data_name: str, bk_tenant_id: str, table_id: str):
     ds = models.DataSource.objects.create(
         bk_data_id=bk_data_id,

@@ -35,6 +35,7 @@ from metadata.models import (
 from metadata.models.data_link.data_link import SURREALDB_RT_SUFFIX
 from metadata.models.data_link.constants import DataLinkResourceStatus
 from metadata.models.data_link.data_link_configs import (
+    DataBusConfig,
     GraphDataBusConfig,
     GraphRelationBindingConfig,
     ResultTableConfig,
@@ -156,10 +157,51 @@ def _graph_definitions_changed(graph_binding: GraphRelationBindingConfig, vertic
 
 
 def _graph_relation_binding_sync_healthy(graph_binding: GraphRelationBindingConfig) -> bool:
-    return (
-        graph_binding.status != DataLinkResourceStatus.FAILED.value
-        and graph_binding.component_status == DataLinkResourceStatus.OK.value
+    if graph_binding.status == DataLinkResourceStatus.FAILED.value:
+        return False
+    if graph_binding.component_status != DataLinkResourceStatus.OK.value:
+        return False
+
+    common_filters = {
+        "bk_tenant_id": graph_binding.bk_tenant_id,
+        "namespace": graph_binding.namespace,
+        "data_link_name": graph_binding.data_link_name,
+    }
+    component_checks = []
+    if graph_binding.should_write_vm:
+        component_checks.extend(
+            [
+                (ResultTableConfig, graph_binding.bkbase_result_table_name),
+                (DataBusConfig, graph_binding.vm_databus_name),
+            ]
+        )
+    if graph_binding.should_write_surrealdb:
+        component_checks.extend(
+            [
+                (ResultTableConfig, graph_binding.graph_result_table_name),
+                (SurrealDBBindingConfig, graph_binding.surrealdb_binding_component_name),
+                (GraphDataBusConfig, graph_binding.graph_databus_component_name),
+            ]
+        )
+
+    return all(
+        bool(component_name)
+        and component.objects.filter(
+            **common_filters,
+            name=component_name,
+            status=DataLinkResourceStatus.OK.value,
+        ).exists()
+        for component, component_name in component_checks
     )
+
+
+def _get_builtin_relation_token(ds: DataSource, table_id: str, generated_token: str) -> str:
+    time_series_group = TimeSeriesGroup.objects.filter(
+        bk_data_id=ds.bk_data_id,
+        table_id=table_id,
+        bk_tenant_id=ds.bk_tenant_id,
+    ).first()
+    return time_series_group.token if time_series_group and time_series_group.token else generated_token
 
 
 def _canonical_graph_definitions(definitions: list) -> list[str]:
@@ -654,21 +696,22 @@ def sync_relation_redis_data():
                 generated_token = transform_data_id_to_token(
                     metric_data_id=ds.bk_data_id, bk_biz_id=biz_id, app_name=data_name
                 )
-                # 兼容历史问题，如果DB中存储的Token和生成的不一致，更新之
-                if ds.token != generated_token:
+                builtin_token = _get_builtin_relation_token(ds, table_id, generated_token)
+                # 兼容历史问题，如果DB中存储的Token和实际采集校验 Token 不一致，更新之
+                if ds.token != builtin_token:
                     logger.info(
                         "sync_relation_redis_data: data_id->[%s] ,token is not same,db_record->[%s],"
-                        "generated_token->[%s]",
+                        "builtin_token->[%s]",
                         ds.bk_data_id,
                         ds.token,
-                        generated_token,
+                        builtin_token,
                     )
-                    ds.token = generated_token
+                    ds.token = builtin_token
                     ds.save(update_fields=["token"])
                     ds.refresh_consul_config()
 
                 # 更新Redis中的数据
-                value_dict["token"] = generated_token
+                value_dict["token"] = builtin_token
                 value_dict["modifyTime"] = new_modify_time
                 RedisTools.hset_to_redis(redis_key, key, json.dumps(value_dict))
                 _enable_relation_surrealdb_dual_write_best_effort(ds, bk_tenant_id, biz_id)
@@ -720,11 +763,13 @@ def sync_relation_redis_data():
                     bk_biz_id=biz_id,
                     app_name=data_name,
                 )
-                ds.token = generated_token
-                ds.save(update_fields=["token"])
-                ds.refresh_consul_config()
+                builtin_token = _get_builtin_relation_token(ds, table_id, generated_token)
+                if ds.token != builtin_token:
+                    ds.token = builtin_token
+                    ds.save(update_fields=["token"])
+                    ds.refresh_consul_config()
                 # 更新Redis中的Token和modifyTime
-                value_dict["token"] = generated_token
+                value_dict["token"] = builtin_token
                 value_dict["modifyTime"] = int(ts_group.last_modify_time.timestamp())
                 RedisTools.hset_to_redis(redis_key, key, json.dumps(value_dict))
                 _enable_relation_surrealdb_dual_write_best_effort(ds, bk_tenant_id, biz_id)

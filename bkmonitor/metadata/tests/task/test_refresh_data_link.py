@@ -229,7 +229,7 @@ def test_refresh_data_link_status_falls_back_to_bk_data_id(create_or_delete_reco
 
 @pytest.mark.django_db(databases="__all__")
 def test_refresh_graph_link_status_skips_local_binding(mocker):
-    """GraphRelationBindingConfig 是本地聚合配置，不应作为 BKBase 资源查询状态。"""
+    """GraphRelationBindingConfig 参与本地状态聚合，但不应作为 BKBase 资源查询状态。"""
     data_link_name = "bkm_graph_status_link"
     models.BkBaseResultTable.objects.create(
         data_link_name=data_link_name,
@@ -288,7 +288,7 @@ def test_refresh_graph_link_status_skips_local_binding(mocker):
 
     queried_kinds = [call.kwargs["kind"] for call in status_mock.call_args_list]
     assert models.GraphRelationBindingConfig.kind not in queried_kinds
-    assert models.GraphRelationBindingConfig.objects.get(pk=graph_binding.pk).status == "creating"
+    assert models.GraphRelationBindingConfig.objects.get(pk=graph_binding.pk).status == "Ok"
 
 
 @pytest.mark.django_db(databases="__all__")
