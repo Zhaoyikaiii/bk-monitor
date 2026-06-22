@@ -610,7 +610,10 @@ class DataLink(models.Model):
             surrealdb_cluster = (
                 surrealdb_cluster_queryset.filter(cluster_name=surrealdb_cluster_name).first()
                 if surrealdb_cluster_name
-                else surrealdb_cluster_queryset.filter(is_default_cluster=True).first()
+                else (
+                    surrealdb_cluster_queryset.filter(is_default_cluster=True).first()
+                    or surrealdb_cluster_queryset.order_by("cluster_id").first()
+                )
             )
             if not surrealdb_cluster:
                 raise ValueError("compose_graph_relation_time_series_configs: not found surrealdb cluster")

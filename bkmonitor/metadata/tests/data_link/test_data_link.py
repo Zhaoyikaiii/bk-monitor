@@ -5984,6 +5984,39 @@ def test_graph_relation_compose_allows_empty_definitions_and_keeps_table_type(cr
 
 
 @pytest.mark.django_db(databases="__all__")
+def test_graph_relation_compose_uses_synced_non_default_surrealdb_cluster(create_or_delete_records, mocker):
+    datalink, ds, rt = _prepare_bk_standard_v2_datalink()
+    datalink.data_link_strategy = DataLink.GRAPH_RELATION_TIME_SERIES
+    datalink.save(update_fields=["data_link_strategy"])
+    models.ClusterInfo.objects.create(
+        cluster_name="surreal-synced",
+        cluster_type=models.ClusterInfo.TYPE_SURREALDB,
+        domain_name="synced.surrealdb",
+        port=8000,
+        description="",
+        cluster_id=300101,
+        is_default_cluster=False,
+        version="2.x",
+        bk_tenant_id=datalink.bk_tenant_id,
+    )
+    mocker.patch(
+        "metadata.models.data_link.data_link.EntityMeta.auto_query_graph_definitions",
+        return_value=([{"name": "pod", "id_fields": ["pod_name"]}], [{"name": "pod_node"}]),
+    )
+    mocker.patch("metadata.models.data_link.data_link.SurrealDBStorage.create_table")
+
+    datalink.compose_graph_relation_time_series_configs(
+        bk_biz_id=1001,
+        data_source=ds,
+        table_id=rt.table_id,
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_SURREALDB,
+    )
+
+    graph_binding = GraphRelationBindingConfig.objects.get(name=datalink.data_link_name)
+    assert graph_binding.surrealdb_cluster_name == "surreal-synced"
+
+
+@pytest.mark.django_db(databases="__all__")
 def test_surrealdb_create_table_switches_current_storage_cluster_record(create_or_delete_records):
     table_id = "1001_bkmonitor.graph_relation"
     for cluster_id, cluster_name in [(300001, "surreal-a"), (300002, "surreal-b")]:
@@ -6165,8 +6198,16 @@ def test_graph_relation_binding_delete_uses_distinct_child_component_names(mocke
                     "table_id": table_id,
                 }
             )
-        elif model in (DataBusConfig, GraphDataBusConfig):
+        elif model is DataBusConfig:
             defaults.update({"data_id_name": "data", "bk_data_id": 50003, "sink_names": []})
+        elif model is GraphDataBusConfig:
+            defaults.update(
+                {
+                    "data_id_name": "data",
+                    "bk_data_id": 50003,
+                    "sink_names": [f"{DataLinkKind.SURREALDBBINDING.value}:surreal_binding"],
+                }
+            )
         model.objects.create(**defaults)
     models.SurrealDBStorage.objects.create(
         table_id=table_id,
