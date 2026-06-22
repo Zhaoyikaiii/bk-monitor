@@ -1347,7 +1347,7 @@ class SurrealDBBindingConfig(DataLinkResourceConfigBase):
             "name": self.name,
             "namespace": self.namespace,
             "bk_biz_id": self.datalink_biz_ids.label_biz_id,
-            "rt_name": self.name,
+            "rt_name": self.bkbase_result_table_name or self.name,
             "surrealdb_name": self.surrealdb_cluster_name,
             "table_type": self.table_type,
             "vertices": json.dumps(self.vertices),

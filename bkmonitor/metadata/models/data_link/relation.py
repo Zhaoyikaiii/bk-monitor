@@ -141,6 +141,11 @@ def _merge_graph_dual_write_sibling_databus(
     databus: DataBusConfig,
     sink_instances: list[DataLinkResourceConfigBase],
 ) -> tuple[list[DataBusConfig], list[DataLinkResourceConfigBase]]:
+    def graph_result_table_group_key(rt_name: str) -> str:
+        if rt_name.endswith("_graph"):
+            rt_name = rt_name[: -len("_graph")]
+        return f"graph-rt-group:{rt_name}"
+
     def graph_storage_keys(instances: list[DataLinkResourceConfigBase]) -> set[str]:
         keys: set[str] = set()
         for instance in instances:
@@ -150,6 +155,7 @@ def _merge_graph_dual_write_sibling_databus(
                 keys.add(f"table:{instance.table_id}")
             if instance.bkbase_result_table_name:
                 keys.add(f"rt:{instance.bkbase_result_table_name}")
+                keys.add(graph_result_table_group_key(instance.bkbase_result_table_name))
         return keys
 
     current_has_vm = any(isinstance(instance, VMStorageBindingConfig) for instance in sink_instances)

@@ -502,7 +502,7 @@ class DataLink(models.Model):
         if settings.ENABLE_MULTI_TENANT_MODE:
             surreal_sinks[0]["tenant"] = self.bk_tenant_id
 
-        with transaction.atomic():
+        with transaction.atomic(using=DATABASE_CONNECTION_NAME):
             rt_surreal_ins, _ = ResultTableConfig.objects.update_or_create(
                 name=surrealdb_rt_name,
                 data_link_name=self.data_link_name,
@@ -739,7 +739,7 @@ class DataLink(models.Model):
             configs.extend(
                 [
                     vm_table_id_ins.compose_config(),
-                    vm_storage_ins.compose_config(bk_data_id=data_source.bk_data_id),
+                    vm_storage_ins.compose_config(rt_name=graph_binding_ins.bkbase_result_table_name),
                     data_bus_ins.compose_config(sinks),
                 ]
             )
@@ -2449,8 +2449,16 @@ class DataLink(models.Model):
             namespace=self.namespace,
             data_link_name=self.data_link_name,
         )
-        if rt_name:
-            databus_queryset = databus_queryset.filter(name=rt_name)
+        databus_name = rt_name
+        if rt_name and self.data_link_strategy == self.GRAPH_RELATION_TIME_SERIES:
+            graph_binding = self._get_graph_relation_binding()
+            if graph_binding:
+                if databus_class is GraphDataBusConfig and rt_name == graph_binding.graph_result_table_name:
+                    databus_name = graph_binding.graph_databus_component_name
+                elif databus_class is DataBusConfig and rt_name == graph_binding.bkbase_result_table_name:
+                    databus_name = graph_binding.vm_databus_component_name
+        if databus_name:
+            databus_queryset = databus_queryset.filter(name=databus_name)
         databus_queryset = databus_queryset.order_by("-last_modify_time", "-id")
         databus_count = databus_queryset.count()
         databus = databus_queryset.first()

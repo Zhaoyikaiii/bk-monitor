@@ -3384,13 +3384,13 @@ def test_rebuild_bkbase_v4_datalink_relation_deduplicates_graph_dual_write_dry_r
         bk_data_id=60200,
     )
     models.ResultTableConfig.objects.create(
-        name="graph_vm_rt",
+        name="bkm_graph_dual_rt",
         namespace="bkmonitor",
         bk_tenant_id="system",
         bk_biz_id=1001,
     )
     models.ResultTableConfig.objects.create(
-        name="graph_surreal_rt",
+        name="bkm_graph_dual_rt_graph",
         namespace="bkmonitor",
         bk_tenant_id="system",
         bk_biz_id=1001,
@@ -3400,18 +3400,18 @@ def test_rebuild_bkbase_v4_datalink_relation_deduplicates_graph_dual_write_dry_r
         namespace="bkmonitor",
         bk_tenant_id="system",
         bk_biz_id=1001,
-        bkbase_result_table_name="graph_vm_rt",
+        bkbase_result_table_name="bkm_graph_dual_rt",
         vm_cluster_name="vm-default",
-        table_id=table_id,
+        table_id="",
     )
     models.SurrealDBBindingConfig.objects.create(
         name="graph_surreal_binding",
         namespace="bkmonitor",
         bk_tenant_id="system",
         bk_biz_id=1001,
-        bkbase_result_table_name="graph_surreal_rt",
+        bkbase_result_table_name="bkm_graph_dual_rt_graph",
         surrealdb_cluster_name="surreal-default",
-        table_id=table_id,
+        table_id="",
     )
     models.DataBusConfig.objects.create(
         name="graph_vm_databus",
@@ -5660,6 +5660,53 @@ def test_sync_metadata_uses_filtered_latest_config_when_duplicates_exist(create_
 
 
 @pytest.mark.django_db(databases="__all__")
+def test_graph_relation_sync_metadata_uses_stored_databus_component_name(create_or_delete_records):
+    datalink, ds, rt = _prepare_bk_standard_v2_datalink()
+    datalink.data_link_strategy = DataLink.GRAPH_RELATION_TIME_SERIES
+    datalink.save(update_fields=["data_link_strategy"])
+    GraphRelationBindingConfig.objects.create(
+        name="rebuilt__graph_relation",
+        namespace=datalink.namespace,
+        bk_tenant_id=datalink.bk_tenant_id,
+        data_link_name=datalink.data_link_name,
+        bk_biz_id=1001,
+        table_id=rt.table_id,
+        bkbase_result_table_name="rebuilt_vm_rt",
+        graph_result_table_name="rebuilt_graph_rt",
+        vm_storage_binding_name="rebuilt_vm_binding",
+        vm_databus_name="rebuilt_vm_databus",
+        surrealdb_binding_name="rebuilt_surreal_binding",
+        graph_databus_name="rebuilt_graph_databus",
+        vm_cluster_name="vm-plat",
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
+    )
+    ResultTableConfig.objects.create(
+        name="rebuilt_vm_rt",
+        namespace=datalink.namespace,
+        bk_tenant_id=datalink.bk_tenant_id,
+        data_link_name=datalink.data_link_name,
+        bk_biz_id=1001,
+        table_id=rt.table_id,
+    )
+    DataBusConfig.objects.create(
+        name="rebuilt_vm_databus",
+        namespace=datalink.namespace,
+        bk_tenant_id=datalink.bk_tenant_id,
+        data_link_name=datalink.data_link_name,
+        bk_biz_id=1001,
+        data_id_name="rebuilt_data_id",
+        bk_data_id=ds.bk_data_id,
+        sink_names=[f"{DataLinkKind.VMSTORAGEBINDING.value}:rebuilt_vm_binding"],
+    )
+
+    datalink.sync_metadata(table_id=rt.table_id, storage_cluster_name="vm-plat")
+
+    brt = BkBaseResultTable.objects.get(data_link_name=datalink.data_link_name)
+    assert brt.bkbase_rt_name == "rebuilt_vm_rt"
+    assert brt.bkbase_data_name == "rebuilt_data_id"
+
+
+@pytest.mark.django_db(databases="__all__")
 def test_bk_standard_v2_result_table_option_enables_reuse(create_or_delete_records, settings, mocker):
     """RT option=true 时，即使 strategy 灰度关闭，单表 apply 也应进入复用逻辑。"""
     datalink, ds, rt = _prepare_bk_standard_v2_datalink()
@@ -6081,8 +6128,12 @@ def test_graph_relation_compose_preserves_existing_child_component_names(create_
     assert not DataBusConfig.objects.filter(name=generated_vmrt_name).exists()
     assert not SurrealDBBindingConfig.objects.filter(name=generated_graph_rt_name).exists()
     assert not GraphDataBusConfig.objects.filter(name=generated_graph_rt_name).exists()
+    assert configs[1]["metadata"]["name"] == "rebuilt_vm_binding"
+    assert configs[1]["spec"]["data"]["name"] == "rebuilt_vm_rt"
     assert configs[2]["metadata"]["name"] == "rebuilt_vm_databus"
     assert configs[2]["spec"]["sinks"][0]["name"] == "rebuilt_vm_binding"
+    assert configs[4]["metadata"]["name"] == "rebuilt_surreal_binding"
+    assert configs[4]["spec"]["data"]["name"] == "rebuilt_graph_rt"
     assert configs[5]["metadata"]["name"] == "rebuilt_graph_databus"
     assert configs[5]["spec"]["sinks"][0]["name"] == "rebuilt_surreal_binding"
 
