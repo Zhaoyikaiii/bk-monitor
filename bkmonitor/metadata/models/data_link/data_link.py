@@ -291,14 +291,11 @@ class DataLink(models.Model):
             table_id__in=table_ids,
             bk_tenant_id=self.bk_tenant_id,
         )
-        cluster_ids = list(storages.values_list("storage_cluster_id", flat=True))
         storages.delete()
-        if cluster_ids:
-            StorageClusterRecord.objects.filter(
-                table_id__in=table_ids,
-                bk_tenant_id=self.bk_tenant_id,
-                cluster_id__in=cluster_ids,
-            ).delete()
+        StorageClusterRecord.objects.filter(
+            table_id__in=table_ids,
+            bk_tenant_id=self.bk_tenant_id,
+        ).delete()
 
     def get_related_component_classes(
         self, write_mode: str | None = None
@@ -633,6 +630,10 @@ class DataLink(models.Model):
             "surrealdb_cluster_name": surrealdb_cluster_name,
             "bkbase_result_table_name": bkbase_vmrt_name,
             "graph_result_table_name": surrealdb_rt_name,
+            "vm_storage_binding_name": bkbase_vmrt_name,
+            "vm_databus_name": bkbase_vmrt_name,
+            "surrealdb_binding_name": surrealdb_rt_name,
+            "graph_databus_name": surrealdb_rt_name,
             "table_type": table_type,
             "vertices": queried_vertices,
             "relations": queried_relations,
@@ -645,7 +646,7 @@ class DataLink(models.Model):
         )
         graph_binding_defaults["write_mode"] = effective_write_mode
         graph_binding_lookup = {
-            "name": self.data_link_name,
+            "name": existed_graph_binding.name if existed_graph_binding else self.data_link_name,
             "data_link_name": self.data_link_name,
             "namespace": self.namespace,
             "bk_biz_id": bk_biz_id,

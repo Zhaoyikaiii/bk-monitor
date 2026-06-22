@@ -197,6 +197,25 @@ def _compose_rebuilt_graph_binding_name(data_link_name: str) -> str:
     return utils.compose_bkdata_table_id(data_link_name)
 
 
+def _compose_rebuilt_graph_data_link_name(databus: DataBusConfig) -> str:
+    raw_name = f"{REBUILT_DATA_LINK_NAME_PREFIX}{databus.bk_tenant_id}__{databus.namespace}__{databus.name}"
+    return f"{REBUILT_DATA_LINK_NAME_PREFIX}{utils.compose_bkdata_table_id(raw_name)}"
+
+
+def _find_databus_name_for_sink(
+    databus_instances: list[DataBusConfig],
+    sink_kind: str,
+    sink_name: str,
+) -> str:
+    if not sink_name:
+        return ""
+    target_sink = f"{sink_kind}:{sink_name}"
+    for databus in databus_instances:
+        if target_sink in (databus.sink_names or []):
+            return databus.name
+    return sink_name
+
+
 def _get_single_data_source_table_id(databus: DataBusConfig, data_source) -> str:
     table_ids = list(
         DataSourceResultTable.objects.filter(
@@ -1019,8 +1038,11 @@ def rebuild_databus_relation(databus: DataBusConfig, dry_run: bool = True) -> Da
             )
             return None
 
-    # Step 8: data_link_name 使用 "rebuilt__" 前缀 + 租户/命名空间/DataBus name，确保跨租户唯一
-    data_link_name = f"{REBUILT_DATA_LINK_NAME_PREFIX}{databus.bk_tenant_id}__{databus.namespace}__{databus_name}"
+    # Step 8: graph rebuild 使用短 data_link_name，避免写入 64 字符的组件外键时超长。
+    if strategy == DataLink.GRAPH_RELATION_TIME_SERIES:
+        data_link_name = _compose_rebuilt_graph_data_link_name(databus)
+    else:
+        data_link_name = f"{REBUILT_DATA_LINK_NAME_PREFIX}{databus.bk_tenant_id}__{databus.namespace}__{databus_name}"
 
     # Step 9: 收集 table_ids（来自 ResultTableConfig.table_id，过滤空值）
     table_ids = [rt.table_id for rt in rt_instances if rt.table_id]
@@ -1092,8 +1114,20 @@ def rebuild_databus_relation(databus: DataBusConfig, dry_run: bool = True) -> Da
                     "vm_cluster_name": getattr(vm_binding, "vm_cluster_name", ""),
                     "surrealdb_cluster_name": getattr(surrealdb_binding, "surrealdb_cluster_name", ""),
                     "table_id": table_ids[0] if table_ids else "",
-                    "bkbase_result_table_name": getattr(vm_binding, "name", ""),
-                    "graph_result_table_name": getattr(surrealdb_binding, "name", ""),
+                    "bkbase_result_table_name": getattr(vm_binding, "bkbase_result_table_name", ""),
+                    "graph_result_table_name": getattr(surrealdb_binding, "bkbase_result_table_name", ""),
+                    "vm_storage_binding_name": getattr(vm_binding, "name", ""),
+                    "vm_databus_name": _find_databus_name_for_sink(
+                        databus_instances,
+                        DataLinkKind.VMSTORAGEBINDING.value,
+                        getattr(vm_binding, "name", ""),
+                    ),
+                    "surrealdb_binding_name": getattr(surrealdb_binding, "name", ""),
+                    "graph_databus_name": _find_databus_name_for_sink(
+                        databus_instances,
+                        DataLinkKind.SURREALDBBINDING.value,
+                        getattr(surrealdb_binding, "name", ""),
+                    ),
                     "table_type": getattr(surrealdb_binding, "table_type", "temporary"),
                     "vertices": getattr(surrealdb_binding, "vertices", []),
                     "relations": getattr(surrealdb_binding, "relations", []),

@@ -3560,6 +3560,7 @@ def test_rebuild_graph_relation_binding_uses_short_name_for_long_databus():
 
     graph_binding = GraphRelationBindingConfig.objects.get(data_link_name__startswith="rebuilt__")
     assert len(graph_binding.name) <= 64
+    assert len(graph_binding.data_link_name) <= 64
     assert graph_binding.name != graph_binding.data_link_name
 
 
@@ -3630,8 +3631,12 @@ def test_rebuild_graph_relation_merges_siblings_without_prefilled_table_id():
 
     graph_binding = GraphRelationBindingConfig.objects.get()
     assert graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
-    assert graph_binding.bkbase_result_table_name == "graph_vm_binding"
-    assert graph_binding.graph_result_table_name == "graph_surreal_binding"
+    assert graph_binding.bkbase_result_table_name == "graph_vm_rt"
+    assert graph_binding.graph_result_table_name == "graph_surreal_rt"
+    assert graph_binding.vm_storage_binding_name == "graph_vm_binding"
+    assert graph_binding.vm_databus_name == "graph_vm_databus"
+    assert graph_binding.surrealdb_binding_name == "graph_surreal_binding"
+    assert graph_binding.graph_databus_name == "graph_surreal_databus"
     assert graph_binding.table_id == table_id
 
 
@@ -6117,6 +6122,82 @@ def test_delete_graph_relation_data_link_falls_back_when_binding_missing(mocker)
 
 
 @pytest.mark.django_db(databases="__all__")
+def test_graph_relation_binding_delete_uses_distinct_child_component_names(mocker):
+    data_link_name = "graph_distinct_child_names"
+    table_id = "2_bkcc_built_in_time_series.__default__"
+    graph_binding = GraphRelationBindingConfig.objects.create(
+        name="graph_binding",
+        data_link_name=data_link_name,
+        namespace="bkmonitor",
+        bk_tenant_id="system",
+        bk_biz_id=2,
+        table_id=table_id,
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
+        bkbase_result_table_name="vm_rt",
+        graph_result_table_name="graph_rt",
+        vm_storage_binding_name="vm_binding",
+        vm_databus_name="vm_databus",
+        surrealdb_binding_name="surreal_binding",
+        graph_databus_name="graph_databus",
+    )
+    for name, model in (
+        ("vm_rt", ResultTableConfig),
+        ("graph_rt", ResultTableConfig),
+        ("vm_binding", VMStorageBindingConfig),
+        ("surreal_binding", SurrealDBBindingConfig),
+        ("vm_databus", DataBusConfig),
+        ("graph_databus", GraphDataBusConfig),
+    ):
+        defaults = {
+            "name": name,
+            "data_link_name": data_link_name,
+            "namespace": "bkmonitor",
+            "bk_tenant_id": "system",
+            "bk_biz_id": 2,
+        }
+        if model is VMStorageBindingConfig:
+            defaults["bkbase_result_table_name"] = "vm_rt"
+        elif model is SurrealDBBindingConfig:
+            defaults.update(
+                {
+                    "bkbase_result_table_name": "graph_rt",
+                    "surrealdb_cluster_name": "surreal-default",
+                    "table_id": table_id,
+                }
+            )
+        elif model in (DataBusConfig, GraphDataBusConfig):
+            defaults.update({"data_id_name": "data", "bk_data_id": 50003, "sink_names": []})
+        model.objects.create(**defaults)
+    models.SurrealDBStorage.objects.create(
+        table_id=table_id,
+        bk_tenant_id="system",
+        table_type="temporary",
+        vertices=[],
+        relations=[],
+        storage_cluster_id=300001,
+    )
+    models.StorageClusterRecord.objects.create(
+        table_id=table_id,
+        bk_tenant_id="system",
+        cluster_id=300001,
+        creator="test",
+    )
+    mock_delete = mocker.patch("metadata.models.data_link.data_link_configs.api.bkdata.delete_data_link")
+
+    graph_binding.delete_config()
+
+    deleted_names = {call.kwargs["name"] for call in mock_delete.call_args_list}
+    assert deleted_names == {"vm_databus", "vm_binding", "vm_rt", "graph_databus", "surreal_binding", "graph_rt"}
+    assert not ResultTableConfig.objects.filter(data_link_name=data_link_name).exists()
+    assert not VMStorageBindingConfig.objects.filter(data_link_name=data_link_name).exists()
+    assert not SurrealDBBindingConfig.objects.filter(data_link_name=data_link_name).exists()
+    assert not DataBusConfig.objects.filter(data_link_name=data_link_name).exists()
+    assert not GraphDataBusConfig.objects.filter(data_link_name=data_link_name).exists()
+    assert not models.SurrealDBStorage.objects.filter(table_id=table_id).exists()
+    assert not models.StorageClusterRecord.objects.filter(table_id=table_id).exists()
+
+
+@pytest.mark.django_db(databases="__all__")
 def test_graph_relation_apply_failure_keeps_existing_write_mode(create_or_delete_records, mocker):
     datalink, ds, rt = _prepare_bk_standard_v2_datalink()
     datalink.data_link_strategy = DataLink.GRAPH_RELATION_TIME_SERIES
@@ -6205,6 +6286,39 @@ def test_graph_relation_apply_success_persists_deferred_binding_update(create_or
     assert graph_binding.vertices == [{"name": "pod", "id_fields": ["pod_name"]}]
     assert graph_binding.relations == [{"name": "pod_node", "from": "pod", "to": "node"}]
     assert not hasattr(datalink, "_graph_binding_update_after_apply")
+
+
+@pytest.mark.django_db(databases="__all__")
+def test_graph_relation_apply_reuses_existing_short_binding_name(create_or_delete_records, mocker):
+    datalink, ds, rt = _prepare_bk_standard_v2_datalink()
+    datalink.data_link_strategy = DataLink.GRAPH_RELATION_TIME_SERIES
+    datalink.save(update_fields=["data_link_strategy"])
+    GraphRelationBindingConfig.objects.create(
+        name="short_graph_binding",
+        namespace=datalink.namespace,
+        bk_tenant_id=datalink.bk_tenant_id,
+        data_link_name=datalink.data_link_name,
+        bk_biz_id=1001,
+        table_id=rt.table_id,
+        vm_cluster_name="vm-plat",
+        bkbase_result_table_name=utils.compose_bkdata_table_id(rt.table_id),
+        graph_result_table_name=DataLink.compose_surrealdb_table_name(rt.table_id),
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
+    )
+    mocker.patch.object(DataLink, "apply_data_link_with_retry", return_value={"result": True})
+
+    datalink.apply_data_link(
+        bk_biz_id=1001,
+        data_source=ds,
+        table_id=rt.table_id,
+        storage_cluster_name="vm-plat",
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM,
+    )
+
+    assert GraphRelationBindingConfig.objects.count() == 1
+    graph_binding = GraphRelationBindingConfig.objects.get()
+    assert graph_binding.name == "short_graph_binding"
+    assert graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM
 
 
 @pytest.mark.django_db(databases="__all__")

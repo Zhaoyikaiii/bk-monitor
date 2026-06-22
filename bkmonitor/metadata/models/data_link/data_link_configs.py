@@ -605,6 +605,10 @@ class GraphRelationBindingConfig(DataLinkResourceConfigBase):
     table_id = models.CharField(verbose_name="结果表ID", max_length=255, default="", blank=True)
     bkbase_result_table_name = models.CharField(verbose_name="BKBase结果表名称", max_length=255, default="")
     graph_result_table_name = models.CharField(verbose_name="图BKBase结果表名称", max_length=255, default="")
+    vm_storage_binding_name = models.CharField(verbose_name="VM存储绑定名称", max_length=255, default="", blank=True)
+    vm_databus_name = models.CharField(verbose_name="VM清洗任务名称", max_length=255, default="", blank=True)
+    surrealdb_binding_name = models.CharField(verbose_name="SurrealDB绑定名称", max_length=255, default="", blank=True)
+    graph_databus_name = models.CharField(verbose_name="图清洗任务名称", max_length=255, default="", blank=True)
     table_type = models.CharField(verbose_name="图表类型", max_length=32, default="temporary")
     vertices = models.JSONField(verbose_name="顶点定义", default=list)
     relations = models.JSONField(verbose_name="关系定义", default=list)
@@ -625,6 +629,22 @@ class GraphRelationBindingConfig(DataLinkResourceConfigBase):
     def should_write_surrealdb(self) -> bool:
         return self.write_mode in (self.WRITE_MODE_SURREALDB, self.WRITE_MODE_VM_AND_SURREALDB)
 
+    @property
+    def vm_binding_component_name(self) -> str:
+        return self.vm_storage_binding_name or self.bkbase_result_table_name
+
+    @property
+    def vm_databus_component_name(self) -> str:
+        return self.vm_databus_name or self.bkbase_result_table_name
+
+    @property
+    def surrealdb_binding_component_name(self) -> str:
+        return self.surrealdb_binding_name or self.graph_result_table_name
+
+    @property
+    def graph_databus_component_name(self) -> str:
+        return self.graph_databus_name or self.graph_result_table_name
+
     @classmethod
     def write_mode_includes_vm(cls, write_mode: str | None) -> bool:
         normalized_write_mode = cls.normalize_write_mode(write_mode)
@@ -639,24 +659,24 @@ class GraphRelationBindingConfig(DataLinkResourceConfigBase):
         from metadata.models.data_link.constants import DataLinkResourceStatus
 
         statuses: list[str] = []
-        if self.should_write_vm and self.bkbase_result_table_name:
+        if self.should_write_vm and self.vm_binding_component_name:
             vm_binding = VMStorageBindingConfig.objects.filter(
                 bk_tenant_id=self.bk_tenant_id,
                 namespace=self.namespace,
                 data_link_name=self.data_link_name,
-                name=self.bkbase_result_table_name,
+                name=self.vm_binding_component_name,
             ).first()
             if vm_binding:
                 statuses.extend([vm_binding.status, vm_binding.component_status or ""])
             else:
                 statuses.append(DataLinkResourceStatus.INITIALIZING.value)
 
-        if self.should_write_surrealdb and self.graph_result_table_name:
+        if self.should_write_surrealdb and self.surrealdb_binding_component_name:
             surrealdb_binding = SurrealDBBindingConfig.objects.filter(
                 bk_tenant_id=self.bk_tenant_id,
                 namespace=self.namespace,
                 data_link_name=self.data_link_name,
-                name=self.graph_result_table_name,
+                name=self.surrealdb_binding_component_name,
             ).first()
             if surrealdb_binding:
                 statuses.extend([surrealdb_binding.status, surrealdb_binding.component_status or ""])
@@ -755,25 +775,25 @@ class GraphRelationBindingConfig(DataLinkResourceConfigBase):
             normalized_new_write_mode,
         )
         if old_write_vm and not new_write_vm:
-            self._delete_component(DataBusConfig, self.bkbase_result_table_name)
-            self._delete_component(VMStorageBindingConfig, self.bkbase_result_table_name)
+            self._delete_component(DataBusConfig, self.vm_databus_component_name)
+            self._delete_component(VMStorageBindingConfig, self.vm_binding_component_name)
             self._delete_component(ResultTableConfig, self.bkbase_result_table_name)
 
         if old_write_surrealdb and not new_write_surrealdb:
-            self._delete_component(GraphDataBusConfig, self.graph_result_table_name)
-            self._delete_component(SurrealDBBindingConfig, self.graph_result_table_name)
+            self._delete_component(GraphDataBusConfig, self.graph_databus_component_name)
+            self._delete_component(SurrealDBBindingConfig, self.surrealdb_binding_component_name)
             self._delete_component(ResultTableConfig, self.graph_result_table_name)
             self._delete_surrealdb_storage()
 
     def delete_config(self):
         if self.should_write_vm:
-            self._delete_component(DataBusConfig, self.bkbase_result_table_name)
-            self._delete_component(VMStorageBindingConfig, self.bkbase_result_table_name)
+            self._delete_component(DataBusConfig, self.vm_databus_component_name)
+            self._delete_component(VMStorageBindingConfig, self.vm_binding_component_name)
             self._delete_component(ResultTableConfig, self.bkbase_result_table_name)
 
         if self.should_write_surrealdb:
-            self._delete_component(GraphDataBusConfig, self.graph_result_table_name)
-            self._delete_component(SurrealDBBindingConfig, self.graph_result_table_name)
+            self._delete_component(GraphDataBusConfig, self.graph_databus_component_name)
+            self._delete_component(SurrealDBBindingConfig, self.surrealdb_binding_component_name)
             self._delete_component(ResultTableConfig, self.graph_result_table_name)
             self._delete_surrealdb_storage()
 
