@@ -191,7 +191,11 @@ class EntityHandler:
             try:
                 from alarm_backends.service.scheduler.app import app
 
-                app.send_task("metadata.sync_graph_definition_to_bkbase", kwargs=task_kwargs)
+                app.send_task(
+                    "metadata.sync_graph_definition_to_bkbase",
+                    kwargs=task_kwargs,
+                    queue="celery_metadata_task_worker",
+                )
                 logger.info(
                     "scheduled bkbase graph definition sync: kind=%s, namespace=%s, name=%s, action=%s",
                     kind,

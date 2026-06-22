@@ -612,6 +612,7 @@ class TestEntityHandlerRedisSync:
                 "generation": 1,
                 "action": "apply",
             },
+            queue="celery_metadata_task_worker",
         )
 
     @override_settings(ENABLE_SYNC_GRAPH_DEFINITION_TO_BKBASE=True)

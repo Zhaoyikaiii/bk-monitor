@@ -156,6 +156,16 @@ def _graph_definitions_changed(graph_binding: GraphRelationBindingConfig, vertic
     )
 
 
+def _graph_definition_sync_write_mode(graph_binding: GraphRelationBindingConfig) -> str:
+    if (
+        graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM
+        and graph_binding.surrealdb_cluster_name
+        and graph_binding.graph_result_table_name
+    ):
+        return GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
+    return graph_binding.write_mode
+
+
 def _graph_relation_binding_sync_healthy(graph_binding: GraphRelationBindingConfig) -> bool:
     if graph_binding.status == DataLinkResourceStatus.FAILED.value:
         return False
@@ -172,7 +182,7 @@ def _graph_relation_binding_sync_healthy(graph_binding: GraphRelationBindingConf
         component_checks.extend(
             [
                 (ResultTableConfig, graph_binding.bkbase_result_table_name),
-                (DataBusConfig, graph_binding.vm_databus_name),
+                (DataBusConfig, graph_binding.vm_databus_component_name),
             ]
         )
     if graph_binding.should_write_surrealdb:
@@ -317,7 +327,11 @@ def sync_graph_definition_to_bkbase(
                     graph_binding.bk_biz_id,
                 )
                 continue
-            graph_definitions_changed = _graph_definitions_changed(graph_binding, vertices, relations)
+            sync_write_mode = _graph_definition_sync_write_mode(graph_binding)
+            graph_definitions_changed = (
+                _graph_definitions_changed(graph_binding, vertices, relations)
+                or sync_write_mode != graph_binding.write_mode
+            )
             if not graph_definitions_changed and _graph_relation_binding_sync_healthy(graph_binding):
                 result["skipped"] += 1
                 continue
@@ -349,7 +363,7 @@ def sync_graph_definition_to_bkbase(
                 data_source=data_source,
                 table_id=table_id,
                 storage_cluster_name=graph_binding.vm_cluster_name,
-                write_mode=graph_binding.write_mode,
+                write_mode=sync_write_mode,
             )
             result["applied"] += 1
             logger.info(
