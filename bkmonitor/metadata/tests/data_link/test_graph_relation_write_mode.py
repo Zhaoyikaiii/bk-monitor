@@ -345,7 +345,11 @@ def test_enable_relation_surrealdb_dual_write_preserves_existing_write_mode(mock
     mock_apply.assert_called_once()
 
 
-def test_enable_relation_surrealdb_dual_write_skips_unchanged_ok_graph_link(mocker):
+@pytest.mark.parametrize(
+    "binding_status",
+    [DataLinkResourceStatus.OK.value, DataLinkResourceStatus.INITIALIZING.value],
+)
+def test_enable_relation_surrealdb_dual_write_skips_unchanged_healthy_graph_link(mocker, binding_status):
     data_source = models.DataSource.objects.create(
         bk_data_id=50016,
         data_name="7_bkcc_built_in_time_series",
@@ -416,7 +420,7 @@ def test_enable_relation_surrealdb_dual_write_skips_unchanged_ok_graph_link(mock
         namespace="bkmonitor",
         bk_tenant_id="system",
         bk_biz_id=7,
-        status=DataLinkResourceStatus.OK.value,
+        status=binding_status,
         write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
         vm_cluster_name="vm-default",
         surrealdb_cluster_name="surreal-default",

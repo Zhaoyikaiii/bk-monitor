@@ -136,7 +136,7 @@ def _graph_definitions_changed(graph_binding: GraphRelationBindingConfig, vertic
 
 def _graph_relation_binding_sync_healthy(graph_binding: GraphRelationBindingConfig) -> bool:
     return (
-        graph_binding.status == DataLinkResourceStatus.OK.value
+        graph_binding.status != DataLinkResourceStatus.FAILED.value
         and graph_binding.component_status == DataLinkResourceStatus.OK.value
     )
 
@@ -216,7 +216,7 @@ def sync_graph_definition_to_bkbase(
                         table_id=table_id,
                         storage_cluster_name=graph_binding.vm_cluster_name,
                         write_mode=GraphRelationBindingConfig.WRITE_MODE_VM,
-                        persist_graph_write_mode=True,
+                        persist_graph_write_mode=False,
                     )
                     result["applied"] += 1
                     logger.warning(
@@ -524,8 +524,7 @@ def enable_relation_surrealdb_dual_write(ds: DataSource, bk_tenant_id: str, bk_b
     if not created:
         if (
             apply_write_mode == desired_write_mode
-            and graph_binding.status == DataLinkResourceStatus.OK.value
-            and graph_binding.component_status == DataLinkResourceStatus.OK.value
+            and _graph_relation_binding_sync_healthy(graph_binding)
             and _is_graph_relation_binding_apply_config_unchanged(
                 graph_binding=graph_binding,
                 effective_write_mode=desired_write_mode,

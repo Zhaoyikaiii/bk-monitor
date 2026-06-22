@@ -598,7 +598,7 @@ def test_sync_graph_definition_downgrades_dual_write_empty_definitions_to_vm(moc
     assert result["failed"] == 0
     mock_apply.assert_called_once()
     assert mock_apply.call_args.kwargs["write_mode"] == GraphRelationBindingConfig.WRITE_MODE_VM
-    assert mock_apply.call_args.kwargs["persist_graph_write_mode"] is True
+    assert mock_apply.call_args.kwargs["persist_graph_write_mode"] is False
 
 
 def test_sync_graph_definition_scopes_datalink_lookup_to_graph_strategy(mocker):
