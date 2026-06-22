@@ -157,12 +157,6 @@ def _graph_definitions_changed(graph_binding: GraphRelationBindingConfig, vertic
 
 
 def _graph_definition_sync_write_mode(graph_binding: GraphRelationBindingConfig) -> str:
-    if (
-        graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM
-        and graph_binding.surrealdb_cluster_name
-        and graph_binding.graph_result_table_name
-    ):
-        return GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
     return graph_binding.write_mode
 
 
@@ -205,12 +199,9 @@ def _graph_relation_binding_sync_healthy(graph_binding: GraphRelationBindingConf
     )
 
 
-def _get_builtin_relation_token(ds: DataSource, table_id: str, generated_token: str) -> str:
-    time_series_group = TimeSeriesGroup.objects.filter(
-        bk_data_id=ds.bk_data_id,
-        table_id=table_id,
-        bk_tenant_id=ds.bk_tenant_id,
-    ).first()
+def _get_builtin_relation_token(
+    ds: DataSource, table_id: str, generated_token: str, time_series_group: TimeSeriesGroup | None = None
+) -> str:
     return time_series_group.token if time_series_group and time_series_group.token else generated_token
 
 
@@ -662,7 +653,9 @@ def sync_relation_redis_data():
     existing_rts = ResultTable.objects.filter(is_builtin=True)
     existing_rts_dict = {rt.table_id: rt for rt in existing_rts}
     existing_time_series_groups = TimeSeriesGroup.objects.filter(table_id__in=existing_rts_dict.keys())
-    existing_time_series_groups_dict = {group.table_id: group for group in existing_time_series_groups}
+    existing_time_series_groups_dict = {
+        (group.bk_tenant_id, group.table_id): group for group in existing_time_series_groups
+    }
     for field, value in redis_data.items():
         try:
             # 将json解析放在try中，确保value是有效的JSON字符串
@@ -710,7 +703,8 @@ def sync_relation_redis_data():
                 generated_token = transform_data_id_to_token(
                     metric_data_id=ds.bk_data_id, bk_biz_id=biz_id, app_name=data_name
                 )
-                builtin_token = _get_builtin_relation_token(ds, table_id, generated_token)
+                time_series_group = existing_time_series_groups_dict.get((bk_tenant_id, table_id)) or ts_group
+                builtin_token = _get_builtin_relation_token(ds, table_id, generated_token, time_series_group)
                 # 兼容历史问题，如果DB中存储的Token和实际采集校验 Token 不一致，更新之
                 if ds.token != builtin_token:
                     logger.info(
@@ -777,7 +771,8 @@ def sync_relation_redis_data():
                     bk_biz_id=biz_id,
                     app_name=data_name,
                 )
-                builtin_token = _get_builtin_relation_token(ds, table_id, generated_token)
+                time_series_group = existing_time_series_groups_dict.get((bk_tenant_id, table_id))
+                builtin_token = _get_builtin_relation_token(ds, table_id, generated_token, time_series_group)
                 if ds.token != builtin_token:
                     ds.token = builtin_token
                     ds.save(update_fields=["token"])

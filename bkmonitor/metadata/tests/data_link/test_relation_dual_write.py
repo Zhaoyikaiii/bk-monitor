@@ -650,7 +650,7 @@ def test_sync_graph_definition_skips_vm_only_empty_definitions(mocker):
     assert graph_binding.status == DataLinkResourceStatus.OK.value
 
 
-def test_sync_graph_definition_promotes_downgraded_vm_binding_when_definitions_return(mocker):
+def test_sync_graph_definition_keeps_explicit_vm_only_binding_when_definitions_return(mocker):
     table_id = "2_bkcc_built_in_time_series.__default__"
     graph_table_name = DataLink.compose_surrealdb_table_name(table_id)
     vertices = [{"name": "pod", "id_fields": ["pod_name"]}]
@@ -715,10 +715,9 @@ def test_sync_graph_definition_promotes_downgraded_vm_binding_when_definitions_r
     result = sync_graph_definition_to_bkbase(namespace=NAMESPACE_ALL, action="apply")
 
     assert result["matched"] == 1
-    assert result["applied"] == 1
-    assert result["skipped"] == 0
-    mock_apply.assert_called_once()
-    assert mock_apply.call_args.kwargs["write_mode"] == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    mock_apply.assert_not_called()
 
 
 def test_sync_graph_definition_treats_fallback_vm_databus_name_as_healthy(mocker):

@@ -19,6 +19,7 @@ from metadata import models
 from metadata.models.data_link.constants import DataLinkResourceStatus
 from metadata.models.data_link.data_link import SURREALDB_RT_SUFFIX
 from metadata.models.data_link.utils import compose_bkdata_table_id
+from metadata.task import sync_cmdb_relation
 from metadata.task.sync_cmdb_relation import (
     _graph_definitions_changed,
     enable_relation_surrealdb_dual_write,
@@ -164,10 +165,13 @@ def test_sync_relation_redis_data_uses_existing_time_series_group_token(create_a
         patch("metadata.task.sync_cmdb_relation.metrics.report_all", return_value=None),
         patch("metadata.models.DataSource.refresh_consul_config", autospec=True) as mock_refresh_consul,
     ):
+        token_spy = mocker.spy(sync_cmdb_relation, "_get_builtin_relation_token")
         sync_relation_redis_data()
 
     builtin_ds = models.DataSource.objects.get(bk_data_id=50010)
     assert builtin_ds.token == "group-token"
+    token_spy.assert_called_once()
+    assert token_spy.call_args.args[3].token == "group-token"
     mock_hset_to_redis.assert_called_once_with(
         f"{settings.BUILTIN_DATA_RT_REDIS_KEY}",
         "bkcc__2",

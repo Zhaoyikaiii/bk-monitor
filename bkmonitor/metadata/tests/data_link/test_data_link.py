@@ -3621,6 +3621,11 @@ def test_rebuild_databus_relation_reconstructs_vm_only_graph_binding():
         is_custom_source=False,
         bk_tenant_id="system",
     )
+    models.DataSourceResultTable.objects.create(
+        bk_data_id=60202,
+        table_id=table_id,
+        bk_tenant_id="system",
+    )
     models.DataIdConfig.objects.create(
         name=data_id_name,
         namespace="bkmonitor",
@@ -3641,7 +3646,6 @@ def test_rebuild_databus_relation_reconstructs_vm_only_graph_binding():
         bk_biz_id=1001,
         bkbase_result_table_name="graph_vm_only_rebuild_rt",
         vm_cluster_name="vm-default",
-        table_id=table_id,
     )
     models.GraphRelationBindingConfig.objects.create(
         name="graph_vm_only_rebuild_relation_binding",
@@ -6779,7 +6783,6 @@ def test_graph_relation_apply_reuses_existing_short_binding_name(create_or_delet
         write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
     )
     mocker.patch.object(DataLink, "apply_data_link_with_retry", return_value={"result": True})
-    mock_transition = mocker.patch.object(GraphRelationBindingConfig, "transition_write_mode", autospec=True)
 
     datalink.apply_data_link(
         bk_biz_id=1001,
@@ -6817,6 +6820,7 @@ def test_graph_relation_apply_transient_write_mode_keeps_desired_mode(create_or_
         write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
     )
     mocker.patch.object(DataLink, "apply_data_link_with_retry", return_value={"result": True})
+    mock_transition = mocker.patch.object(GraphRelationBindingConfig, "transition_write_mode", autospec=True)
 
     datalink.apply_data_link(
         bk_biz_id=1001,

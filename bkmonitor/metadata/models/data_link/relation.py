@@ -1061,14 +1061,11 @@ def rebuild_databus_relation(databus: DataBusConfig, dry_run: bool = True) -> Da
     graph_base_name_to_table_id: dict[str, str] = {}
     for rt_instance in rt_instances:
         binding_instance = rt_name_map[rt_instance.name]
-        surrealdb_table_id_fallback = (
-            data_source_result_table_id if isinstance(binding_instance, SurrealDBBindingConfig) else ""
-        )
         rt_instance.table_id = (
             binding_instance.table_id
             or rt_instance.table_id
             or vmrt_to_table_id.get(rt_instance.bkbase_table_id, "")
-            or surrealdb_table_id_fallback
+            or data_source_result_table_id
         )
         if rt_instance.table_id:
             graph_base_name = _normalize_graph_result_table_name(
