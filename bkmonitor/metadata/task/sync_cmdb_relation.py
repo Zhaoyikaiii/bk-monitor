@@ -34,7 +34,12 @@ from metadata.models import (
 )
 from metadata.models.data_link.data_link import SURREALDB_RT_SUFFIX
 from metadata.models.data_link.constants import DataLinkResourceStatus
-from metadata.models.data_link.data_link_configs import GraphRelationBindingConfig, SurrealDBBindingConfig
+from metadata.models.data_link.data_link_configs import (
+    GraphDataBusConfig,
+    GraphRelationBindingConfig,
+    ResultTableConfig,
+    SurrealDBBindingConfig,
+)
 from metadata.models.data_link.utils import compose_bkdata_table_id
 from metadata.models.entity_relation import EntityMeta, NAMESPACE_ALL
 from metadata.models.space.constants import EtlConfigs
@@ -123,15 +128,31 @@ def _graph_definitions_changed(graph_binding: GraphRelationBindingConfig, vertic
     ) or _canonical_graph_definitions(graph_binding.relations) != _canonical_graph_definitions(relations):
         return True
 
+    if not graph_binding.should_write_surrealdb:
+        return False
+
     if not graph_binding.graph_result_table_name:
         return True
 
-    return not SurrealDBBindingConfig.objects.filter(
-        bk_tenant_id=graph_binding.bk_tenant_id,
-        namespace=graph_binding.namespace,
-        data_link_name=graph_binding.data_link_name,
-        name=graph_binding.surrealdb_binding_component_name,
-    ).exists()
+    common_filters = {
+        "bk_tenant_id": graph_binding.bk_tenant_id,
+        "namespace": graph_binding.namespace,
+        "data_link_name": graph_binding.data_link_name,
+    }
+    return not (
+        ResultTableConfig.objects.filter(
+            **common_filters,
+            name=graph_binding.graph_result_table_name,
+        ).exists()
+        and SurrealDBBindingConfig.objects.filter(
+            **common_filters,
+            name=graph_binding.surrealdb_binding_component_name,
+        ).exists()
+        and GraphDataBusConfig.objects.filter(
+            **common_filters,
+            name=graph_binding.graph_databus_component_name,
+        ).exists()
+    )
 
 
 def _graph_relation_binding_sync_healthy(graph_binding: GraphRelationBindingConfig) -> bool:
@@ -191,6 +212,15 @@ def sync_graph_definition_to_bkbase(
                 error_message = (
                     "graph definitions are empty, SurrealDB write requires non-empty vertices and relations"
                 )
+                if graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM:
+                    result["skipped"] += 1
+                    logger.info(
+                        "sync_graph_definition_to_bkbase: data_link=%s, bk_biz_id=%s has empty graph definitions, "
+                        "skip vm-only binding",
+                        graph_binding.data_link_name,
+                        graph_binding.bk_biz_id,
+                    )
+                    continue
                 if graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB:
                     data_source, table_id = _get_data_source_and_table_id(graph_binding)
                     if not data_source or not table_id:

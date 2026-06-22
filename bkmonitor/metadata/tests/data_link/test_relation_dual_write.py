@@ -601,6 +601,55 @@ def test_sync_graph_definition_downgrades_dual_write_empty_definitions_to_vm(moc
     assert mock_apply.call_args.kwargs["persist_graph_write_mode"] is False
 
 
+def test_sync_graph_definition_skips_vm_only_empty_definitions(mocker):
+    table_id = "2_bkcc_built_in_time_series.__default__"
+    data_source = create_graph_relation_data_source()
+    models.DataSourceResultTable.objects.create(
+        bk_data_id=data_source.bk_data_id,
+        table_id=table_id,
+        bk_tenant_id=data_source.bk_tenant_id,
+        creator="system",
+    )
+    data_link = DataLink.objects.create(
+        bk_tenant_id="system",
+        data_link_name="bkm_relation_empty_definition_vm_sync",
+        namespace="bkmonitor",
+        data_link_strategy=DataLink.GRAPH_RELATION_TIME_SERIES,
+        bk_data_id=data_source.bk_data_id,
+        table_ids=[table_id],
+    )
+    GraphRelationBindingConfig.objects.create(
+        name=data_link.data_link_name,
+        data_link_name=data_link.data_link_name,
+        namespace=data_link.namespace,
+        bk_tenant_id=data_link.bk_tenant_id,
+        bk_biz_id=2,
+        table_id=table_id,
+        vm_cluster_name="vm-default",
+        surrealdb_cluster_name="surreal-default",
+        graph_result_table_name=DataLink.compose_surrealdb_table_name(table_id),
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM,
+        status=DataLinkResourceStatus.OK.value,
+        vertices=[{"name": "pod", "id_fields": ["pod_name"]}],
+        relations=[{"name": "pod_node", "from": "pod", "to": "node"}],
+    )
+    mocker.patch("metadata.task.sync_cmdb_relation.EntityMeta.auto_query_graph_definitions", return_value=([], []))
+    mock_apply = mocker.patch.object(DataLink, "apply_data_link")
+
+    from metadata.models.entity_relation import NAMESPACE_ALL
+    from metadata.task.sync_cmdb_relation import sync_graph_definition_to_bkbase
+
+    result = sync_graph_definition_to_bkbase(namespace=NAMESPACE_ALL, action="delete")
+
+    assert result["matched"] == 1
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["failed"] == 0
+    mock_apply.assert_not_called()
+    graph_binding = GraphRelationBindingConfig.objects.get(data_link_name=data_link.data_link_name)
+    assert graph_binding.status == DataLinkResourceStatus.OK.value
+
+
 def test_sync_graph_definition_scopes_datalink_lookup_to_graph_strategy(mocker):
     table_id = "2_bkcc_built_in_time_series.__default__"
     data_source = create_graph_relation_data_source()
@@ -857,6 +906,84 @@ def test_sync_graph_definition_retries_unchanged_failed_binding(mocker):
     mocker.patch(
         "metadata.task.sync_cmdb_relation.EntityMeta.auto_query_graph_definitions",
         return_value=(vertices, relations),
+    )
+    mock_apply = mocker.patch.object(DataLink, "apply_data_link")
+
+    from metadata.models.entity_relation import NAMESPACE_ALL
+    from metadata.task.sync_cmdb_relation import sync_graph_definition_to_bkbase
+
+    result = sync_graph_definition_to_bkbase(namespace=NAMESPACE_ALL, action="apply")
+
+    assert result["matched"] == 1
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert result["failed"] == 0
+    mock_apply.assert_called_once()
+
+
+def test_sync_graph_definition_reapplies_when_graph_databus_missing(mocker):
+    table_id = "2_bkcc_built_in_time_series.__default__"
+    graph_table_name = DataLink.compose_surrealdb_table_name(table_id)
+    vertices = [{"name": "pod", "id_fields": ["pod_name"]}]
+    relations = [{"name": "pod_node", "from": "pod", "to": "node"}]
+    data_source = create_graph_relation_data_source()
+    models.DataSourceResultTable.objects.create(
+        bk_data_id=data_source.bk_data_id,
+        table_id=table_id,
+        bk_tenant_id=data_source.bk_tenant_id,
+        creator="system",
+    )
+    data_link = DataLink.objects.create(
+        bk_tenant_id="system",
+        data_link_name="bkm_relation_graph_missing_databus",
+        namespace="bkmonitor",
+        data_link_strategy=DataLink.GRAPH_RELATION_TIME_SERIES,
+        bk_data_id=data_source.bk_data_id,
+        table_ids=[table_id],
+    )
+    GraphRelationBindingConfig.objects.create(
+        name=data_link.data_link_name,
+        data_link_name=data_link.data_link_name,
+        namespace=data_link.namespace,
+        bk_tenant_id=data_link.bk_tenant_id,
+        bk_biz_id=2,
+        table_id=table_id,
+        vm_cluster_name="vm-default",
+        surrealdb_cluster_name="surreal-default",
+        graph_result_table_name=graph_table_name,
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_SURREALDB,
+        status=DataLinkResourceStatus.OK.value,
+        vertices=vertices,
+        relations=relations,
+    )
+    ResultTableConfig.objects.create(
+        name=graph_table_name,
+        data_link_name=data_link.data_link_name,
+        namespace=data_link.namespace,
+        bk_tenant_id=data_link.bk_tenant_id,
+        bk_biz_id=2,
+        table_id=table_id,
+    )
+    SurrealDBBindingConfig.objects.create(
+        name=graph_table_name,
+        data_link_name=data_link.data_link_name,
+        namespace=data_link.namespace,
+        bk_tenant_id=data_link.bk_tenant_id,
+        bk_biz_id=2,
+        status=DataLinkResourceStatus.OK.value,
+        surrealdb_cluster_name="surreal-default",
+        table_id=table_id,
+        bkbase_result_table_name=graph_table_name,
+        vertices=vertices,
+        relations=relations,
+    )
+    mocker.patch(
+        "metadata.task.sync_cmdb_relation.EntityMeta.auto_query_graph_definitions",
+        return_value=(vertices, relations),
+    )
+    mocker.patch(
+        "metadata.models.data_link.service.get_data_link_component_status",
+        return_value=DataLinkResourceStatus.OK.value,
     )
     mock_apply = mocker.patch.object(DataLink, "apply_data_link")
 

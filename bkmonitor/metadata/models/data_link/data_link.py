@@ -680,7 +680,7 @@ class DataLink(models.Model):
         cleanup_graph_binding = existed_graph_binding
         cleanup_write_mode = (
             effective_write_mode
-            if persist_write_mode and existed_graph_binding and existed_graph_binding.write_mode != effective_write_mode
+            if existed_graph_binding and existed_graph_binding.write_mode != effective_write_mode
             else None
         )
         graph_binding_model_defaults = {**graph_binding_defaults, "write_mode": effective_write_mode}
@@ -713,7 +713,7 @@ class DataLink(models.Model):
                 defaults=graph_binding_status_defaults,
             )
 
-        if cleanup_write_mode is not None:
+        if persist_write_mode and cleanup_write_mode is not None:
             self._graph_write_mode_after_apply = (graph_binding_ins.pk, effective_write_mode)
 
         configs: list[dict[str, Any]] = []

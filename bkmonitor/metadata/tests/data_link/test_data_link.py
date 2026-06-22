@@ -6779,6 +6779,7 @@ def test_graph_relation_apply_reuses_existing_short_binding_name(create_or_delet
         write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
     )
     mocker.patch.object(DataLink, "apply_data_link_with_retry", return_value={"result": True})
+    mock_transition = mocker.patch.object(GraphRelationBindingConfig, "transition_write_mode", autospec=True)
 
     datalink.apply_data_link(
         bk_biz_id=1001,
@@ -6830,6 +6831,8 @@ def test_graph_relation_apply_transient_write_mode_keeps_desired_mode(create_or_
     assert graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
     assert graph_binding.surrealdb_cluster_name == "old-surreal"
     assert graph_binding.table_type == "normal"
+    mock_transition.assert_called_once()
+    assert mock_transition.call_args.args[1] == GraphRelationBindingConfig.WRITE_MODE_VM
     assert not hasattr(datalink, "_graph_binding_update_after_apply")
 
 
