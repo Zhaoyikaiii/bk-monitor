@@ -148,11 +148,40 @@ def _merge_graph_dual_write_sibling_databus(
 
     def graph_storage_keys(instances: list[DataLinkResourceConfigBase]) -> set[str]:
         keys: set[str] = set()
-        for instance in instances:
-            if not isinstance(instance, (VMStorageBindingConfig, SurrealDBBindingConfig)):
-                continue
-            if instance.table_id:
-                keys.add(f"table:{instance.table_id}")
+        storage_bindings = [
+            instance
+            for instance in instances
+            if isinstance(instance, (VMStorageBindingConfig, SurrealDBBindingConfig))
+        ]
+        rt_names = [instance.bkbase_result_table_name for instance in storage_bindings if instance.bkbase_result_table_name]
+        rt_table_id_map = {
+            rt.name: rt.table_id
+            for rt in ResultTableConfig.objects.filter(
+                bk_tenant_id=databus.bk_tenant_id,
+                namespace=databus.namespace,
+                name__in=rt_names,
+            )
+        }
+        data_source_result_table_ids = list(
+            DataSourceResultTable.objects.filter(
+                bk_data_id=databus.bk_data_id,
+                bk_tenant_id=databus.bk_tenant_id,
+            )
+            .order_by()
+            .values_list("table_id", flat=True)
+            .distinct()
+        )
+        data_source_result_table_id = (
+            data_source_result_table_ids[0] if len(data_source_result_table_ids) == 1 else ""
+        )
+        for instance in storage_bindings:
+            table_id = (
+                instance.table_id
+                or rt_table_id_map.get(instance.bkbase_result_table_name, "")
+                or data_source_result_table_id
+            )
+            if table_id:
+                keys.add(f"table:{table_id}")
             if instance.bkbase_result_table_name:
                 keys.add(f"rt:{instance.bkbase_result_table_name}")
                 keys.add(graph_result_table_group_key(instance.bkbase_result_table_name))

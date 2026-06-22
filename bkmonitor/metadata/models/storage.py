@@ -6173,7 +6173,7 @@ class SurrealDBStorage(models.Model, StorageResultTable):
                 raise ValueError("SurrealDB存储集群配置有误，请确认或联系管理员处理")
 
         try:
-            with transaction.atomic():
+            with atomic(config.DATABASE_CONNECTION_NAME):
                 record, created = cls.objects.update_or_create(
                     table_id=table_id,
                     bk_tenant_id=bk_tenant_id,
@@ -6184,10 +6184,15 @@ class SurrealDBStorage(models.Model, StorageResultTable):
                         "storage_cluster_id": storage_cluster_id,
                     },
                 )
+                surrealdb_cluster_ids = ClusterInfo.objects.filter(
+                    bk_tenant_id=bk_tenant_id,
+                    cluster_type=ClusterInfo.TYPE_SURREALDB,
+                ).values_list("cluster_id", flat=True)
                 StorageClusterRecord.objects.filter(
                     bk_tenant_id=bk_tenant_id,
                     table_id=table_id,
                     is_current=True,
+                    cluster_id__in=surrealdb_cluster_ids,
                 ).exclude(cluster_id=storage_cluster_id).update(is_current=False)
                 StorageClusterRecord.objects.update_or_create(
                     bk_tenant_id=bk_tenant_id,

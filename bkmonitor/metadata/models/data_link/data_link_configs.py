@@ -1733,7 +1733,9 @@ class ClusterConfig(models.Model):
         }
 
         default_settings = cast(dict[str, Any] | None, cluster.default_settings)
-        if default_settings and default_settings.get("version"):
+        if cluster.version:
+            config["spec"]["version"] = cluster.version
+        elif default_settings and default_settings.get("version"):
             config["spec"]["version"] = default_settings["version"]
 
         if settings.ENABLE_MULTI_TENANT_MODE:

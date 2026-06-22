@@ -44,6 +44,7 @@ from metadata.models.data_link.constants import (
     SYSTEM_PROC_PORT_DATABUS_FORMAT,
 )
 from metadata.models.data_link.data_link_configs import (
+    ClusterConfig,
     DataBusConfig,
     DorisStorageBindingConfig,
     ESStorageBindingConfig,
@@ -6153,6 +6154,12 @@ def test_surrealdb_create_table_switches_current_storage_cluster_record(create_o
             version="2.x",
             bk_tenant_id="system",
         )
+    models.StorageClusterRecord.objects.create(
+        bk_tenant_id="system",
+        table_id=table_id,
+        cluster_id=400001,
+        is_current=True,
+    )
 
     models.SurrealDBStorage.create_table(table_id=table_id, bk_tenant_id="system", storage_cluster_id=300001)
     models.SurrealDBStorage.create_table(table_id=table_id, bk_tenant_id="system", storage_cluster_id=300002)
@@ -6161,8 +6168,32 @@ def test_surrealdb_create_table_switches_current_storage_cluster_record(create_o
         record.cluster_id: record.is_current
         for record in models.StorageClusterRecord.objects.filter(table_id=table_id, bk_tenant_id="system")
     }
-    assert records == {300001: False, 300002: True}
+    assert records == {300001: False, 300002: True, 400001: True}
     assert models.SurrealDBStorage.objects.get(table_id=table_id, bk_tenant_id="system").storage_cluster_id == 300002
+
+
+@pytest.mark.django_db(databases="__all__")
+def test_surrealdb_cluster_config_uses_cluster_version():
+    cluster = models.ClusterInfo.objects.create(
+        cluster_name="surreal-versioned",
+        cluster_type=models.ClusterInfo.TYPE_SURREALDB,
+        domain_name="surreal.example.com",
+        port=8000,
+        username="root",
+        password="root",
+        cluster_id=300003,
+        version="2.3.2",
+        default_settings={"version": "stale"},
+        bk_tenant_id="system",
+    )
+    cluster_config = ClusterConfig(
+        bk_tenant_id="system",
+        namespace="bkmonitor",
+        name=cluster.cluster_name,
+        kind=DataLinkKind.SURREALDB.value,
+    )
+
+    assert cluster_config.compose_surrealdb_config(cluster)["spec"]["version"] == "2.3.2"
 
 
 @pytest.mark.django_db(databases="__all__")
