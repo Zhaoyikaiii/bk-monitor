@@ -6209,8 +6209,20 @@ class SurrealDBStorage(models.Model, StorageResultTable):
     def add_field(self, field):
         pass
 
+    @property
     def consul_config(self):
-        pass
+        """返回 SurrealDB 存储配置，供通用 ResultTable storage 查询序列化。"""
+        consul_config = {
+            "storage_config": {
+                "table_type": self.table_type,
+                "vertices": self.vertices or [],
+                "relations": self.relations or [],
+                "bk_tenant_id": self.bk_tenant_id,
+            }
+        }
+        consul_config.update(self.storage_cluster.consul_config)
+        consul_config["cluster_config"].pop("last_modify_time", None)
+        return consul_config
 
     def get_client(self):
         pass

@@ -141,6 +141,17 @@ def _merge_graph_dual_write_sibling_databus(
     databus: DataBusConfig,
     sink_instances: list[DataLinkResourceConfigBase],
 ) -> tuple[list[DataBusConfig], list[DataLinkResourceConfigBase]]:
+    def graph_storage_keys(instances: list[DataLinkResourceConfigBase]) -> set[str]:
+        keys: set[str] = set()
+        for instance in instances:
+            if not isinstance(instance, (VMStorageBindingConfig, SurrealDBBindingConfig)):
+                continue
+            if instance.table_id:
+                keys.add(f"table:{instance.table_id}")
+            if instance.bkbase_result_table_name:
+                keys.add(f"rt:{instance.bkbase_result_table_name}")
+        return keys
+
     current_has_vm = any(isinstance(instance, VMStorageBindingConfig) for instance in sink_instances)
     current_has_surrealdb = any(isinstance(instance, SurrealDBBindingConfig) for instance in sink_instances)
     if current_has_vm and current_has_surrealdb:
@@ -148,12 +159,8 @@ def _merge_graph_dual_write_sibling_databus(
     if not (current_has_vm or current_has_surrealdb):
         return [databus], sink_instances
 
-    current_table_ids = {
-        instance.table_id
-        for instance in sink_instances
-        if isinstance(instance, (VMStorageBindingConfig, SurrealDBBindingConfig)) and instance.table_id
-    }
-    if not current_table_ids:
+    current_keys = graph_storage_keys(sink_instances)
+    if not current_keys:
         return [databus], sink_instances
 
     candidate_databuses = DataBusConfig.objects.filter(
@@ -175,12 +182,7 @@ def _merge_graph_dual_write_sibling_databus(
         has_surrealdb = any(isinstance(instance, SurrealDBBindingConfig) for instance in combined_sinks)
         if not (has_vm and has_surrealdb):
             continue
-        candidate_table_ids = {
-            instance.table_id
-            for instance in candidate_sinks
-            if isinstance(instance, (VMStorageBindingConfig, SurrealDBBindingConfig)) and instance.table_id
-        }
-        if current_table_ids & candidate_table_ids:
+        if current_keys & graph_storage_keys(candidate_sinks):
             return [databus, candidate], combined_sinks
 
     return [databus], sink_instances
@@ -1090,8 +1092,8 @@ def rebuild_databus_relation(databus: DataBusConfig, dry_run: bool = True) -> Da
                     "vm_cluster_name": getattr(vm_binding, "vm_cluster_name", ""),
                     "surrealdb_cluster_name": getattr(surrealdb_binding, "surrealdb_cluster_name", ""),
                     "table_id": table_ids[0] if table_ids else "",
-                    "bkbase_result_table_name": getattr(vm_binding, "bkbase_result_table_name", ""),
-                    "graph_result_table_name": getattr(surrealdb_binding, "bkbase_result_table_name", ""),
+                    "bkbase_result_table_name": getattr(vm_binding, "name", ""),
+                    "graph_result_table_name": getattr(surrealdb_binding, "name", ""),
                     "table_type": getattr(surrealdb_binding, "table_type", "temporary"),
                     "vertices": getattr(surrealdb_binding, "vertices", []),
                     "relations": getattr(surrealdb_binding, "relations", []),

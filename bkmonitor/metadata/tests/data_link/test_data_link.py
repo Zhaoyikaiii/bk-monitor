@@ -3556,12 +3556,83 @@ def test_rebuild_graph_relation_binding_uses_short_name_for_long_databus():
         sink_names=[f"{DataLinkKind.SURREALDBBINDING.value}:graph_long_surreal_binding"],
     )
 
-    results = rebuild_bkbase_v4_datalink_relation(bk_tenant_id="system", namespace="bkmonitor", dry_run=False)
+    rebuild_bkbase_v4_datalink_relation(bk_tenant_id="system", namespace="bkmonitor", dry_run=False)
 
-    assert len(results) == 1
-    graph_binding = GraphRelationBindingConfig.objects.get(data_link_name=results[0].data_link_name)
+    graph_binding = GraphRelationBindingConfig.objects.get(data_link_name__startswith="rebuilt__")
     assert len(graph_binding.name) <= 64
-    assert graph_binding.name != results[0].data_link_name
+    assert graph_binding.name != graph_binding.data_link_name
+
+
+@pytest.mark.django_db(databases="__all__")
+def test_rebuild_graph_relation_merges_siblings_without_prefilled_table_id():
+    table_id = "1001_bkmonitor_time_series_60204.__default__"
+    data_id_name = "graph_missing_table_id_data"
+    models.DataSource.objects.create(
+        bk_data_id=60204,
+        data_name=data_id_name,
+        mq_cluster_id=1,
+        mq_config_id=1,
+        etl_config="bk_standard_v2_time_series",
+        is_custom_source=False,
+        bk_tenant_id="system",
+    )
+    models.DataSourceResultTable.objects.create(
+        bk_data_id=60204,
+        table_id=table_id,
+        bk_tenant_id="system",
+    )
+    models.DataIdConfig.objects.create(
+        name=data_id_name,
+        namespace="bkmonitor",
+        bk_tenant_id="system",
+        bk_biz_id=1001,
+        bk_data_id=60204,
+    )
+    for rt_name in ("graph_vm_rt", "graph_surreal_rt"):
+        models.ResultTableConfig.objects.create(
+            name=rt_name,
+            namespace="bkmonitor",
+            bk_tenant_id="system",
+            bk_biz_id=1001,
+            bkbase_table_id="bkbase_graph_rt",
+        )
+    models.VMStorageBindingConfig.objects.create(
+        name="graph_vm_binding",
+        namespace="bkmonitor",
+        bk_tenant_id="system",
+        bk_biz_id=1001,
+        bkbase_result_table_name="graph_vm_rt",
+        vm_cluster_name="vm-default",
+    )
+    models.SurrealDBBindingConfig.objects.create(
+        name="graph_surreal_binding",
+        namespace="bkmonitor",
+        bk_tenant_id="system",
+        bk_biz_id=1001,
+        bkbase_result_table_name="graph_surreal_rt",
+        surrealdb_cluster_name="surreal-default",
+    )
+    for databus_name, sink_kind, sink_name in (
+        ("graph_vm_databus", DataLinkKind.VMSTORAGEBINDING.value, "graph_vm_binding"),
+        ("graph_surreal_databus", DataLinkKind.SURREALDBBINDING.value, "graph_surreal_binding"),
+    ):
+        models.DataBusConfig.objects.create(
+            name=databus_name,
+            namespace="bkmonitor",
+            bk_tenant_id="system",
+            bk_biz_id=1001,
+            data_id_name=data_id_name,
+            bk_data_id=60204,
+            sink_names=[f"{sink_kind}:{sink_name}"],
+        )
+
+    rebuild_bkbase_v4_datalink_relation(bk_tenant_id="system", namespace="bkmonitor", dry_run=False)
+
+    graph_binding = GraphRelationBindingConfig.objects.get()
+    assert graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
+    assert graph_binding.bkbase_result_table_name == "graph_vm_binding"
+    assert graph_binding.graph_result_table_name == "graph_surreal_binding"
+    assert graph_binding.table_id == table_id
 
 
 @pytest.mark.django_db(databases="__all__")
@@ -6022,6 +6093,13 @@ def test_delete_graph_relation_data_link_falls_back_when_binding_missing(mocker)
         bk_tenant_id=data_link.bk_tenant_id,
         cluster_id=300001,
         creator="test",
+    )
+    models.StorageClusterRecord.objects.create(
+        table_id="2_bkcc_built_in_time_series.__default__",
+        bk_tenant_id=data_link.bk_tenant_id,
+        cluster_id=300002,
+        creator="test",
+        is_current=False,
     )
     mock_delete = mocker.patch("metadata.models.data_link.data_link_configs.api.bkdata.delete_data_link")
 
