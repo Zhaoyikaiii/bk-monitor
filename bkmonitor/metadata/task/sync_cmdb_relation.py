@@ -121,7 +121,7 @@ def _graph_definitions_changed(graph_binding: GraphRelationBindingConfig, vertic
         bk_tenant_id=graph_binding.bk_tenant_id,
         namespace=graph_binding.namespace,
         data_link_name=graph_binding.data_link_name,
-        name=graph_binding.graph_result_table_name,
+        name=graph_binding.surrealdb_binding_component_name,
     ).exists()
 
 
@@ -280,8 +280,9 @@ def sync_graph_definition_to_bkbase(
             )
         except Exception as e:  # pylint: disable=broad-except
             result["failed"] += 1
-            graph_binding.status = DataLinkResourceStatus.FAILED.value
-            graph_binding.save(update_fields=["status"])
+            if not dry_run:
+                graph_binding.status = DataLinkResourceStatus.FAILED.value
+                graph_binding.save(update_fields=["status"])
             result["failures"].append(
                 {
                     "data_link_name": graph_binding.data_link_name,
@@ -435,7 +436,10 @@ def enable_relation_surrealdb_dual_write(ds: DataSource, bk_tenant_id: str, bk_b
         surrealdb_cluster = (
             surrealdb_cluster_queryset.filter(cluster_name=existed_graph_binding.surrealdb_cluster_name).first()
             if existed_graph_binding and existed_graph_binding.surrealdb_cluster_name
-            else surrealdb_cluster_queryset.filter(is_default_cluster=True).first()
+            else (
+                surrealdb_cluster_queryset.filter(is_default_cluster=True).first()
+                or surrealdb_cluster_queryset.order_by("cluster_id").first()
+            )
         )
     if should_write_surrealdb and not surrealdb_cluster:
         logger.warning(

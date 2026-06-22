@@ -19,7 +19,11 @@ from metadata import models
 from metadata.models.data_link.constants import DataLinkResourceStatus
 from metadata.models.data_link.data_link import SURREALDB_RT_SUFFIX
 from metadata.models.data_link.utils import compose_bkdata_table_id
-from metadata.task.sync_cmdb_relation import enable_relation_surrealdb_dual_write, sync_relation_redis_data
+from metadata.task.sync_cmdb_relation import (
+    _graph_definitions_changed,
+    enable_relation_surrealdb_dual_write,
+    sync_relation_redis_data,
+)
 from metadata.tests.common_utils import consul_client
 
 mock_redis_hgetall_return_value = {
@@ -245,3 +249,71 @@ def test_enable_relation_graph_link_applies_vm_fallback_when_existing_config_unc
     assert mock_apply.call_args.kwargs["persist_graph_write_mode"] is False
     graph_binding = models.GraphRelationBindingConfig.objects.get(name=graph_link_name)
     assert graph_binding.write_mode == models.GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
+
+
+@pytest.mark.django_db(databases="__all__")
+def test_graph_definitions_changed_uses_stored_surrealdb_binding_name():
+    graph_binding = models.GraphRelationBindingConfig.objects.create(
+        name="graph_binding",
+        data_link_name="graph_link",
+        namespace=settings.DEFAULT_VM_DATA_LINK_NAMESPACE,
+        bk_tenant_id="system",
+        bk_biz_id=2,
+        table_id="2_bkcc_built_in_time_series.__default__",
+        graph_result_table_name="graph_rt",
+        surrealdb_binding_name="rebuilt_surreal_binding",
+        vertices=[{"name": "pod", "id_fields": ["pod_name"]}],
+        relations=[{"name": "pod_node", "from": "pod", "to": "node"}],
+        write_mode=models.GraphRelationBindingConfig.WRITE_MODE_SURREALDB,
+    )
+    models.SurrealDBBindingConfig.objects.create(
+        name="rebuilt_surreal_binding",
+        data_link_name="graph_link",
+        namespace=settings.DEFAULT_VM_DATA_LINK_NAMESPACE,
+        bk_tenant_id="system",
+        bk_biz_id=2,
+        table_id="2_bkcc_built_in_time_series.__default__",
+        bkbase_result_table_name="graph_rt",
+        surrealdb_cluster_name="surreal-default",
+    )
+
+    assert not _graph_definitions_changed(graph_binding, graph_binding.vertices, graph_binding.relations)
+
+
+@pytest.mark.django_db(databases="__all__")
+def test_enable_relation_graph_link_falls_back_to_synced_surrealdb_cluster(mocker):
+    table_id = "10_bkcc_built_in_time_series.__default__"
+    data_source = _create_relation_graph_source(61010, "10_bkcc_built_in_time_series", "system", table_id)
+    models.ClusterInfo.objects.create(
+        cluster_id=910500,
+        cluster_name="vm-default-system",
+        cluster_type=models.ClusterInfo.TYPE_VM,
+        domain_name="vm.service",
+        port=9090,
+        description="",
+        is_default_cluster=True,
+        bk_tenant_id="system",
+        registered_to_bkbase=True,
+    )
+    models.ClusterInfo.objects.create(
+        cluster_id=910600,
+        cluster_name="surreal-synced",
+        cluster_type=models.ClusterInfo.TYPE_SURREALDB,
+        domain_name="surreal.service",
+        port=8000,
+        description="",
+        is_default_cluster=False,
+        bk_tenant_id="system",
+        registered_to_bkbase=True,
+    )
+    mocker.patch(
+        "metadata.task.sync_cmdb_relation.EntityMeta.auto_query_graph_definitions",
+        return_value=([{"name": "pod", "id_fields": ["pod_name"]}], [{"name": "pod_node"}]),
+    )
+    mock_apply = mocker.patch("metadata.models.data_link.data_link.DataLink.apply_data_link", return_value=None)
+
+    enable_relation_surrealdb_dual_write(data_source, "system", 10)
+
+    mock_apply.assert_called_once()
+    graph_binding = models.GraphRelationBindingConfig.objects.get()
+    assert graph_binding.surrealdb_cluster_name == "surreal-synced"

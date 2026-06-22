@@ -292,7 +292,7 @@ def test_refresh_graph_link_status_skips_local_binding(mocker):
 
 
 @pytest.mark.django_db(databases="__all__")
-def test_refresh_graph_relation_binding_status_can_recover_from_failed(mocker):
+def test_refresh_graph_relation_binding_status_preserves_failed_until_reapply(mocker):
     data_link_name = "bkm_graph_recover_data_link"
     models.BkBaseResultTable.objects.create(
         data_link_name=data_link_name,
@@ -331,4 +331,4 @@ def test_refresh_graph_relation_binding_status_can_recover_from_failed(mocker):
 
     _refresh_data_link_status(models.BkBaseResultTable.objects.get(data_link_name=data_link_name))
 
-    assert models.GraphRelationBindingConfig.objects.get(data_link_name=data_link_name).status == "Ok"
+    assert models.GraphRelationBindingConfig.objects.get(data_link_name=data_link_name).status == DataLinkResourceStatus.FAILED.value

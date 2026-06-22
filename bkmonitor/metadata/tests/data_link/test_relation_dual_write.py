@@ -755,6 +755,54 @@ def test_sync_graph_definition_dry_run_does_not_mark_empty_surrealdb_binding_fai
     assert graph_binding.status == DataLinkResourceStatus.OK.value
 
 
+def test_sync_graph_definition_dry_run_does_not_mark_apply_exception_failed(mocker):
+    table_id = "2_bkcc_built_in_time_series.__default__"
+    data_source = create_graph_relation_data_source()
+    models.DataSourceResultTable.objects.create(
+        bk_data_id=data_source.bk_data_id,
+        table_id=table_id,
+        bk_tenant_id=data_source.bk_tenant_id,
+        creator="system",
+    )
+    data_link = DataLink.objects.create(
+        bk_tenant_id="system",
+        data_link_name="bkm_relation_graph_apply_dry_run_failure",
+        namespace="bkmonitor",
+        data_link_strategy=DataLink.GRAPH_RELATION_TIME_SERIES,
+        bk_data_id=data_source.bk_data_id,
+        table_ids=[table_id],
+    )
+    GraphRelationBindingConfig.objects.create(
+        name=data_link.data_link_name,
+        data_link_name=data_link.data_link_name,
+        namespace=data_link.namespace,
+        bk_tenant_id=data_link.bk_tenant_id,
+        bk_biz_id=2,
+        table_id=table_id,
+        vm_cluster_name="vm-default",
+        surrealdb_cluster_name="surreal-default",
+        graph_result_table_name=DataLink.compose_surrealdb_table_name(table_id),
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
+        status=DataLinkResourceStatus.OK.value,
+        vertices=[{"name": "pod", "id_fields": ["pod_name"]}],
+        relations=[{"name": "pod_node", "from": "pod", "to": "node"}],
+    )
+    mocker.patch(
+        "metadata.task.sync_cmdb_relation.EntityMeta.auto_query_graph_definitions",
+        return_value=([{"name": "service", "id_fields": ["service_name"]}], [{"name": "service_pod"}]),
+    )
+    mocker.patch.object(DataLink, "apply_data_link", side_effect=ValueError("apply failed"))
+
+    from metadata.models.entity_relation import NAMESPACE_ALL
+    from metadata.task.sync_cmdb_relation import sync_graph_definition_to_bkbase
+
+    result = sync_graph_definition_to_bkbase(namespace=NAMESPACE_ALL, action="apply", dry_run=True)
+
+    assert result["failed"] == 1
+    graph_binding = GraphRelationBindingConfig.objects.get(data_link_name=data_link.data_link_name)
+    assert graph_binding.status == DataLinkResourceStatus.OK.value
+
+
 def test_sync_graph_definition_retries_unchanged_failed_binding(mocker):
     table_id = "2_bkcc_built_in_time_series.__default__"
     graph_table_name = DataLink.compose_surrealdb_table_name(table_id)

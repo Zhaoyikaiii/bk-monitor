@@ -803,7 +803,7 @@ def _get_simple_storage_info(
         ).first()
         if record is None:
             return None
-        return ClusterInfo.TYPE_VM, record.storage_cluster_id or record.vm_cluster_id
+        return ClusterInfo.TYPE_VM, record.vm_cluster_id or record.storage_cluster_id
     if isinstance(binding, ESStorageBindingConfig):
         storage = ESStorage.objects.filter(
             bk_tenant_id=binding.bk_tenant_id,
@@ -1221,12 +1221,27 @@ def rebuild_databus_relation(databus: DataBusConfig, dry_run: bool = True) -> Da
             elif surrealdb_binding and not vm_binding:
                 write_mode = GraphRelationBindingConfig.WRITE_MODE_SURREALDB
 
-            GraphRelationBindingConfig.objects.update_or_create(
+            graph_binding_lookup = {
+                "bk_tenant_id": databus.bk_tenant_id,
+                "namespace": databus.namespace,
+                "name": data_link_name,
+            }
+            existing_graph_binding = GraphRelationBindingConfig.objects.filter(
                 bk_tenant_id=databus.bk_tenant_id,
                 namespace=databus.namespace,
-                name=data_link_name,
+                data_link_name="",
+                table_id=resolved_table_id,
+            ).first()
+            if existing_graph_binding:
+                graph_binding_lookup = {"pk": existing_graph_binding.pk}
+
+            GraphRelationBindingConfig.objects.update_or_create(
+                **graph_binding_lookup,
                 defaults={
+                    "name": data_link_name,
                     "data_link_name": data_link_name,
+                    "namespace": databus.namespace,
+                    "bk_tenant_id": databus.bk_tenant_id,
                     "bk_biz_id": databus.bk_biz_id,
                     "status": databus.status,
                     "write_mode": write_mode,

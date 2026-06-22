@@ -869,6 +869,19 @@ def _refresh_data_link_status(bkbase_rt_record: BkBaseResultTable):
 
                     if component_ins.kind == DataLinkKind.GRAPHRELATIONBINDING.value:
                         component_status = component_ins.component_status
+                        if (
+                            component_ins.status == DataLinkResourceStatus.FAILED.value
+                            and component_status == DataLinkResourceStatus.OK.value
+                        ):
+                            all_components_ok = False
+                            logger.info(
+                                "_refresh_data_link_status: data_link_name->[%s],component->[%s],kind->[%s] "
+                                "keep failed status before graph reapply succeeds",
+                                data_link_name,
+                                component_ins.name,
+                                component_ins.kind,
+                            )
+                            continue
                     else:
                         component_status = get_data_link_component_status(
                             bk_tenant_id=bk_tenant_id,

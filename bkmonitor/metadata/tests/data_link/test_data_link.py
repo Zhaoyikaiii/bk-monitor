@@ -3743,10 +3743,20 @@ def test_rebuild_graph_relation_merges_siblings_without_prefilled_table_id():
             bk_data_id=0,
             sink_names=[f"{sink_kind}:{sink_name}"],
         )
+    orphan_graph_binding = GraphRelationBindingConfig.objects.create(
+        name="orphan_graph_binding",
+        data_link_name="",
+        namespace="bkmonitor",
+        bk_tenant_id="system",
+        bk_biz_id=1001,
+        table_id=table_id,
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
+    )
 
     rebuild_bkbase_v4_datalink_relation(bk_tenant_id="system", namespace="bkmonitor", dry_run=False)
 
     graph_binding = GraphRelationBindingConfig.objects.get()
+    assert graph_binding.pk == orphan_graph_binding.pk
     assert graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
     assert graph_binding.bkbase_result_table_name == "graph_vm_rt"
     assert graph_binding.graph_result_table_name == "graph_surreal_rt"
