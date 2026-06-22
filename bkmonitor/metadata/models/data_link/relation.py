@@ -38,6 +38,7 @@ from metadata.models import (
     ResultTable,
 )
 from metadata.models.constants import DataIdCreatedFromSystem
+from metadata.models.data_link import utils
 from metadata.models.data_link.constants import DataLinkKind, DataLinkResourceStatus
 from metadata.models.data_link.data_link import SURREALDB_RT_SUFFIX, DataLink
 from metadata.models.data_link.data_link_configs import (
