@@ -291,11 +291,14 @@ class DataLink(models.Model):
             table_id__in=table_ids,
             bk_tenant_id=self.bk_tenant_id,
         )
+        cluster_ids = list(storages.values_list("storage_cluster_id", flat=True))
         storages.delete()
-        StorageClusterRecord.objects.filter(
-            table_id__in=table_ids,
-            bk_tenant_id=self.bk_tenant_id,
-        ).delete()
+        if cluster_ids:
+            StorageClusterRecord.objects.filter(
+                table_id__in=table_ids,
+                bk_tenant_id=self.bk_tenant_id,
+                cluster_id__in=cluster_ids,
+            ).delete()
 
     def get_related_component_classes(
         self, write_mode: str | None = None
@@ -675,14 +678,23 @@ class DataLink(models.Model):
             "bk_biz_id": bk_biz_id,
             "bk_tenant_id": self.bk_tenant_id,
         }
-        graph_binding_ins = GraphRelationBindingConfig(
-            **graph_binding_lookup,
+        graph_binding_status_defaults = {
             **graph_binding_defaults,
-            status=DataLinkResourceStatus.INITIALIZING.value,
-        )
-        if existed_graph_binding:
-            graph_binding_ins.pk = existed_graph_binding.pk
-        self._graph_binding_update_after_apply = (graph_binding_lookup, graph_binding_defaults)
+            "status": DataLinkResourceStatus.INITIALIZING.value,
+        }
+        if getattr(self, "_defer_graph_binding_update_after_apply", False):
+            graph_binding_ins = GraphRelationBindingConfig(
+                **graph_binding_lookup,
+                **graph_binding_status_defaults,
+            )
+            if existed_graph_binding:
+                graph_binding_ins.pk = existed_graph_binding.pk
+            self._graph_binding_update_after_apply = (graph_binding_lookup, graph_binding_defaults)
+        else:
+            graph_binding_ins, _ = GraphRelationBindingConfig.objects.update_or_create(
+                **graph_binding_lookup,
+                defaults=graph_binding_status_defaults,
+            )
 
         if cleanup_write_mode is not None:
             self._graph_write_mode_after_apply = (graph_binding_ins.pk, effective_write_mode)
@@ -2072,6 +2084,7 @@ class DataLink(models.Model):
         try:
             with transaction.atomic(using=DATABASE_CONNECTION_NAME):
                 try:
+                    self._defer_graph_binding_update_after_apply = True
                     configs: list[dict[str, Any]] = self.compose_configs(
                         *args, existing_context=existing_context, **kwargs
                     )
@@ -2352,6 +2365,7 @@ class DataLink(models.Model):
             "_graph_transition_cleanup_after_apply",
             "_graph_write_mode_after_apply",
             "_graph_binding_update_after_apply",
+            "_defer_graph_binding_update_after_apply",
         ):
             if hasattr(self, attr):
                 delattr(self, attr)

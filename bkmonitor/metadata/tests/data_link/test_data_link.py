@@ -6016,15 +6016,12 @@ def test_graph_relation_compose_allows_empty_definitions_and_keeps_table_type(cr
     graph_binding = GraphRelationBindingConfig.objects.get(name=datalink.data_link_name)
     surrealdb_binding = SurrealDBBindingConfig.objects.get(data_link_name=datalink.data_link_name)
     assert graph_binding.table_type == "normal"
-    assert graph_binding.vertices == [{"name": "pod", "id_fields": ["pod_name"]}]
+    assert graph_binding.vertices == []
     assert graph_binding.relations == []
     assert surrealdb_binding.table_type == "normal"
     assert surrealdb_binding.vertices == []
     assert surrealdb_binding.relations == []
-    binding_lookup, binding_defaults = datalink._graph_binding_update_after_apply
-    assert binding_lookup["name"] == datalink.data_link_name
-    assert binding_defaults["vertices"] == []
-    assert binding_defaults["relations"] == []
+    assert not hasattr(datalink, "_graph_binding_update_after_apply")
     assert configs[1]["kind"] == DataLinkKind.SURREALDBBINDING.value
     assert configs[1]["spec"]["table_type"] == "normal"
     assert configs[1]["spec"]["vertices"] == []
