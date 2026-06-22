@@ -544,12 +544,12 @@ class DataLink(models.Model):
             )
             graph_databus_ins, _ = GraphDataBusConfig.objects.update_or_create(
                 name=graph_databus_name,
-                data_id_name=utils.compose_bkdata_data_id_name(data_source.data_name),
                 data_link_name=self.data_link_name,
                 namespace=self.namespace,
                 bk_biz_id=bk_biz_id,
                 bk_tenant_id=self.bk_tenant_id,
                 defaults={
+                    "data_id_name": utils.compose_bkdata_data_id_name(data_source.data_name),
                     "bk_data_id": data_source.bk_data_id,
                     "sink_names": [f"{DataLinkKind.SURREALDBBINDING.value}:{surrealdb_binding_name}"],
                 },
@@ -736,12 +736,12 @@ class DataLink(models.Model):
 
                 data_bus_ins, _ = DataBusConfig.objects.update_or_create(
                     name=graph_binding_ins.vm_databus_component_name,
-                    data_id_name=bkbase_data_name,
                     data_link_name=self.data_link_name,
                     namespace=self.namespace,
                     bk_biz_id=bk_biz_id,
                     bk_tenant_id=self.bk_tenant_id,
                     defaults={
+                        "data_id_name": bkbase_data_name,
                         "bk_data_id": data_source.bk_data_id,
                         "sink_names": [
                             f"{DataLinkKind.VMSTORAGEBINDING.value}:{graph_binding_ins.vm_binding_component_name}"

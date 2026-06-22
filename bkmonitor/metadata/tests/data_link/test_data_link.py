@@ -55,6 +55,7 @@ from metadata.models.data_link.data_link_configs import (
     VMStorageBindingConfig,
 )
 from metadata.models.data_link.relation import (
+    _resolve_rebuild_result_table_id,
     rebuild_bkbase_v4_datalink_relation,
     rebuild_databus_relation,
     rebuild_simple_databus_relation,
@@ -6046,7 +6047,7 @@ def test_graph_relation_compose_uses_synced_non_default_surrealdb_cluster(create
     )
     mocker.patch(
         "metadata.models.data_link.data_link.EntityMeta.auto_query_graph_definitions",
-        return_value=([{"name": "pod", "id_fields": ["pod_name"]}], [{"name": "pod_node"}]),
+        return_value=([{"name": "pod", "id_fields": ["pod_name"]}], [{"name": "pod_node", "from": "pod", "to": "node"}]),
     )
     mocker.patch("metadata.models.data_link.data_link.SurrealDBStorage.create_table")
 
@@ -6079,6 +6080,26 @@ def test_graph_relation_compose_preserves_existing_child_component_names(create_
     )
     generated_vmrt_name = utils.compose_bkdata_table_id(rt.table_id)
     generated_graph_rt_name = datalink.compose_surrealdb_table_name(rt.table_id)
+    DataBusConfig.objects.create(
+        name="rebuilt_vm_databus",
+        data_id_name="legacy_vm_data_id",
+        data_link_name=datalink.data_link_name,
+        namespace=datalink.namespace,
+        bk_biz_id=1001,
+        bk_tenant_id=datalink.bk_tenant_id,
+        bk_data_id=0,
+        sink_names=["VmStorageBinding:rebuilt_vm_binding"],
+    )
+    GraphDataBusConfig.objects.create(
+        name="rebuilt_graph_databus",
+        data_id_name="legacy_graph_data_id",
+        data_link_name=datalink.data_link_name,
+        namespace=datalink.namespace,
+        bk_biz_id=1001,
+        bk_tenant_id=datalink.bk_tenant_id,
+        bk_data_id=0,
+        sink_names=["SurrealDBBinding:rebuilt_surreal_binding"],
+    )
     GraphRelationBindingConfig.objects.create(
         name="rebuilt__graph_relation",
         namespace=datalink.namespace,
@@ -6098,7 +6119,7 @@ def test_graph_relation_compose_preserves_existing_child_component_names(create_
     )
     mocker.patch(
         "metadata.models.data_link.data_link.EntityMeta.auto_query_graph_definitions",
-        return_value=([{"name": "pod", "id_fields": ["pod_name"]}], [{"name": "pod_node"}]),
+        return_value=([{"name": "pod", "id_fields": ["pod_name"]}], [{"name": "pod_node", "from": "pod", "to": "node"}]),
     )
     mocker.patch("metadata.models.data_link.data_link.SurrealDBStorage.create_table")
 
@@ -6122,6 +6143,12 @@ def test_graph_relation_compose_preserves_existing_child_component_names(create_
     assert DataBusConfig.objects.filter(name="rebuilt_vm_databus").exists()
     assert SurrealDBBindingConfig.objects.filter(name="rebuilt_surreal_binding").exists()
     assert GraphDataBusConfig.objects.filter(name="rebuilt_graph_databus").exists()
+    vm_databus = DataBusConfig.objects.get(name="rebuilt_vm_databus")
+    graph_databus = GraphDataBusConfig.objects.get(name="rebuilt_graph_databus")
+    assert vm_databus.data_id_name == utils.compose_bkdata_data_id_name(ds.data_name)
+    assert graph_databus.data_id_name == utils.compose_bkdata_data_id_name(ds.data_name)
+    assert DataBusConfig.objects.filter(name="rebuilt_vm_databus").count() == 1
+    assert GraphDataBusConfig.objects.filter(name="rebuilt_graph_databus").count() == 1
     assert not VMStorageBindingConfig.objects.filter(name=generated_vmrt_name).exists()
     assert not DataBusConfig.objects.filter(name=generated_vmrt_name).exists()
     assert not SurrealDBBindingConfig.objects.filter(name=generated_graph_rt_name).exists()
@@ -6134,6 +6161,35 @@ def test_graph_relation_compose_preserves_existing_child_component_names(create_
     assert configs[4]["spec"]["data"]["name"] == "rebuilt_graph_rt"
     assert configs[5]["metadata"]["name"] == "rebuilt_graph_databus"
     assert configs[5]["spec"]["sinks"][0]["name"] == "rebuilt_surreal_binding"
+
+
+@pytest.mark.django_db(databases="__all__")
+def test_resolve_rebuild_result_table_id_falls_back_to_single_data_source_table_id():
+    table_id = "2_bkcc_built_in_time_series.__default__"
+    data_source = models.DataSource.objects.create(
+        bk_data_id=50001,
+        data_name="bkcc_built_in_time_series",
+        bk_tenant_id="system",
+        mq_cluster_id=1,
+        mq_config_id=1,
+        etl_config=EtlConfigs.BK_STANDARD_V2_TIME_SERIES.value,
+    )
+    models.DataSourceResultTable.objects.create(
+        bk_data_id=data_source.bk_data_id,
+        table_id=table_id,
+        bk_tenant_id=data_source.bk_tenant_id,
+        creator="system",
+    )
+
+    resolved_table_id = _resolve_rebuild_result_table_id(
+        binding_instance=VMStorageBindingConfig(table_id="", bkbase_result_table_name="rebuilt_vm_rt"),
+        rt_instance=ResultTableConfig(table_id="", bkbase_table_id="rebuilt_vm_rt"),
+        vmrt_to_table_id={},
+        databus=DataBusConfig(bk_tenant_id=data_source.bk_tenant_id),
+        data_source=data_source,
+    )
+
+    assert resolved_table_id == table_id
 
 
 @pytest.mark.django_db(databases="__all__")

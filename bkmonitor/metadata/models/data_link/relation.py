@@ -279,6 +279,10 @@ def _resolve_rebuild_result_table_id(
         return table_id
     if isinstance(binding_instance, SurrealDBBindingConfig):
         return _get_single_data_source_table_id(databus, data_source)
+    if isinstance(binding_instance, VMStorageBindingConfig):
+        return vmrt_to_table_id.get(rt_instance.bkbase_table_id, "") or _get_single_data_source_table_id(
+            databus, data_source
+        )
     return vmrt_to_table_id.get(rt_instance.bkbase_table_id, "")
 
 # etl_config → data_link_strategy 映射
