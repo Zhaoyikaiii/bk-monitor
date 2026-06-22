@@ -15,6 +15,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 
 from alarm_backends.core.lock.service_lock import share_lock
 from bkm_space.utils import space_uid_to_bk_biz_id
@@ -46,10 +47,18 @@ logger = logging.getLogger("metadata")
 def _get_graph_definition_binding_queryset(namespace: str):
     queryset = GraphRelationBindingConfig.objects.filter(
         namespace=settings.DEFAULT_VM_DATA_LINK_NAMESPACE,
-        write_mode__in=[
-            GraphRelationBindingConfig.WRITE_MODE_SURREALDB,
-            GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
-        ],
+    ).filter(
+        Q(
+            write_mode__in=[
+                GraphRelationBindingConfig.WRITE_MODE_SURREALDB,
+                GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
+            ]
+        )
+        | Q(
+            write_mode=GraphRelationBindingConfig.WRITE_MODE_VM,
+            surrealdb_cluster_name__gt="",
+            graph_result_table_name__gt="",
+        )
     )
     if namespace and namespace != NAMESPACE_ALL:
         bk_biz_id = space_uid_to_bk_biz_id(namespace)
@@ -627,6 +636,7 @@ def sync_relation_redis_data():
                     )
                     ds.token = generated_token
                     ds.save(update_fields=["token"])
+                    ds.refresh_consul_config()
 
                 # 更新Redis中的数据
                 value_dict["token"] = generated_token
@@ -683,6 +693,7 @@ def sync_relation_redis_data():
                 )
                 ds.token = generated_token
                 ds.save(update_fields=["token"])
+                ds.refresh_consul_config()
                 # 更新Redis中的Token和modifyTime
                 value_dict["token"] = generated_token
                 value_dict["modifyTime"] = int(ts_group.last_modify_time.timestamp())

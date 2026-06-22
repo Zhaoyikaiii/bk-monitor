@@ -149,13 +149,18 @@ def _normalize_graph_result_table_name(name: str, *, is_graph_result_table: bool
     return name
 
 
-def _graph_storage_binding_merge_keys(instance: DataLinkResourceConfigBase) -> set[str]:
+def _graph_storage_binding_merge_keys(
+    instance: DataLinkResourceConfigBase,
+    rt_table_id_map: dict[str, str] | None = None,
+    fallback_table_id: str = "",
+) -> set[str]:
     keys: set[str] = set()
-    table_id = getattr(instance, "table_id", "")
+    rt_name = getattr(instance, "bkbase_result_table_name", "")
+    table_id = getattr(instance, "table_id", "") or (rt_table_id_map or {}).get(rt_name, "") or fallback_table_id
     if table_id:
         keys.add(f"table:{table_id}")
     normalized_name = _normalize_graph_result_table_name(
-        getattr(instance, "bkbase_result_table_name", ""),
+        rt_name,
         is_graph_result_table=isinstance(instance, SurrealDBBindingConfig),
     )
     if normalized_name:
@@ -168,13 +173,7 @@ def _merge_graph_dual_write_sibling_databus(
     sink_instances: list[DataLinkResourceConfigBase],
     resolved_bk_data_id: int | None = None,
 ) -> tuple[list[DataBusConfig], list[DataLinkResourceConfigBase]]:
-    def graph_result_table_group_key(rt_name: str) -> str:
-        if rt_name.endswith("_graph"):
-            rt_name = rt_name[: -len("_graph")]
-        return f"graph-rt-group:{rt_name}"
-
     def graph_storage_keys(instances: list[DataLinkResourceConfigBase]) -> set[str]:
-        keys: set[str] = set()
         storage_bindings = [
             instance
             for instance in instances
@@ -202,18 +201,15 @@ def _merge_graph_dual_write_sibling_databus(
         data_source_result_table_id = (
             data_source_result_table_ids[0] if len(data_source_result_table_ids) == 1 else ""
         )
-        for instance in storage_bindings:
-            table_id = (
-                instance.table_id
-                or rt_table_id_map.get(instance.bkbase_result_table_name, "")
-                or data_source_result_table_id
+        return {
+            key
+            for instance in storage_bindings
+            for key in _graph_storage_binding_merge_keys(
+                instance,
+                rt_table_id_map=rt_table_id_map,
+                fallback_table_id=data_source_result_table_id,
             )
-            if table_id:
-                keys.add(f"table:{table_id}")
-            if instance.bkbase_result_table_name:
-                keys.add(f"rt:{instance.bkbase_result_table_name}")
-                keys.add(graph_result_table_group_key(instance.bkbase_result_table_name))
-        return keys
+        }
 
     current_has_vm = any(isinstance(instance, VMStorageBindingConfig) for instance in sink_instances)
     current_has_surrealdb = any(isinstance(instance, SurrealDBBindingConfig) for instance in sink_instances)
@@ -222,12 +218,7 @@ def _merge_graph_dual_write_sibling_databus(
     if not (current_has_vm or current_has_surrealdb):
         return [databus], sink_instances
 
-    current_merge_keys = {
-        key
-        for instance in sink_instances
-        if isinstance(instance, (VMStorageBindingConfig, SurrealDBBindingConfig))
-        for key in _graph_storage_binding_merge_keys(instance)
-    }
+    current_merge_keys = graph_storage_keys(sink_instances)
     if not current_merge_keys:
         return [databus], sink_instances
 
@@ -253,12 +244,7 @@ def _merge_graph_dual_write_sibling_databus(
         has_surrealdb = any(isinstance(instance, SurrealDBBindingConfig) for instance in combined_sinks)
         if not (has_vm and has_surrealdb):
             continue
-        candidate_merge_keys = {
-            key
-            for instance in candidate_sinks
-            if isinstance(instance, (VMStorageBindingConfig, SurrealDBBindingConfig))
-            for key in _graph_storage_binding_merge_keys(instance)
-        }
+        candidate_merge_keys = graph_storage_keys(candidate_sinks)
         if current_merge_keys & candidate_merge_keys:
             return [databus, candidate], combined_sinks
 

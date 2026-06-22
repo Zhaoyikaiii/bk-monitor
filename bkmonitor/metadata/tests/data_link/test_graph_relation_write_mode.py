@@ -149,8 +149,9 @@ def test_enable_relation_surrealdb_dual_write_apply_failure_is_best_effort(mocke
 
     enable_relation_surrealdb_dual_write(data_source, "system", 5)
 
-    assert DataLink.objects.filter(data_link_name="5_bkcc_built_in_time_series_graph_relation").exists()
-    binding = GraphRelationBindingConfig.objects.get(data_link_name="5_bkcc_built_in_time_series_graph_relation")
+    data_link_name = compose_bkdata_table_id("system_5_bkcc_built_in_time_series_graph_relation")
+    assert DataLink.objects.filter(data_link_name=data_link_name).exists()
+    binding = GraphRelationBindingConfig.objects.get(data_link_name=data_link_name)
     assert binding.status == DataLinkResourceStatus.FAILED.value
 
 
@@ -200,7 +201,8 @@ def test_enable_relation_surrealdb_dual_write_downgrades_empty_definitions_to_vm
 
     enable_relation_surrealdb_dual_write(data_source, "system", 6)
 
-    binding = GraphRelationBindingConfig.objects.get(data_link_name="6_bkcc_built_in_time_series_graph_relation")
+    data_link_name = compose_bkdata_table_id("system_6_bkcc_built_in_time_series_graph_relation")
+    binding = GraphRelationBindingConfig.objects.get(data_link_name=data_link_name)
     assert binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
     mock_apply.assert_called_once()
     assert mock_apply.call_args.kwargs["write_mode"] == GraphRelationBindingConfig.WRITE_MODE_VM
@@ -252,7 +254,7 @@ def test_enable_relation_surrealdb_dual_write_persists_write_mode_transition(moc
     mocker.patch("metadata.task.sync_cmdb_relation.EntityMeta.auto_query_graph_definitions", return_value=([], []))
     mock_apply = mocker.patch("metadata.models.data_link.data_link.DataLink.apply_data_link")
 
-    data_link_name = "8_bkcc_built_in_time_series_graph_relation"
+    data_link_name = compose_bkdata_table_id("system_8_bkcc_built_in_time_series_graph_relation")
     GraphRelationBindingConfig.objects.create(
         name=data_link_name,
         data_link_name=data_link_name,
@@ -322,7 +324,7 @@ def test_enable_relation_surrealdb_dual_write_preserves_existing_write_mode(mock
         side_effect=RuntimeError("definition lookup should not run for vm-only mode"),
     )
     mock_apply = mocker.patch("metadata.models.data_link.data_link.DataLink.apply_data_link")
-    data_link_name = "3_bkcc_built_in_time_series_graph_relation"
+    data_link_name = compose_bkdata_table_id("system_3_bkcc_built_in_time_series_graph_relation")
     GraphRelationBindingConfig.objects.create(
         name=data_link_name,
         data_link_name=data_link_name,
@@ -398,7 +400,7 @@ def test_enable_relation_surrealdb_dual_write_skips_unchanged_ok_graph_link(mock
         return_value=DataLinkResourceStatus.OK.value,
     )
 
-    data_link_name = "7_bkcc_built_in_time_series_graph_relation"
+    data_link_name = compose_bkdata_table_id("system_7_bkcc_built_in_time_series_graph_relation")
     graph_table_id = "7_bkcc_built_in_time_series_graph.__default__"
     DataLink.objects.create(
         bk_tenant_id="system",
@@ -486,7 +488,7 @@ def test_enable_relation_surrealdb_dual_write_retries_unchanged_failed_graph_lin
         return_value=DataLinkResourceStatus.OK.value,
     )
 
-    data_link_name = "9_bkcc_built_in_time_series_graph_relation"
+    data_link_name = compose_bkdata_table_id("system_9_bkcc_built_in_time_series_graph_relation")
     graph_table_id = "9_bkcc_built_in_time_series_graph.__default__"
     DataLink.objects.create(
         bk_tenant_id="system",
@@ -519,7 +521,7 @@ def test_enable_relation_surrealdb_dual_write_retries_unchanged_failed_graph_lin
     mock_apply.assert_called_once()
 
 
-def test_get_graph_definition_binding_queryset_excludes_vm_only_bindings():
+def test_get_graph_definition_binding_queryset_includes_auto_downgraded_vm_bindings():
     for index, write_mode in enumerate(
         [
             GraphRelationBindingConfig.WRITE_MODE_VM,
@@ -537,12 +539,24 @@ def test_get_graph_definition_binding_queryset_excludes_vm_only_bindings():
             status=DataLinkResourceStatus.OK.value,
             write_mode=write_mode,
         )
+    GraphRelationBindingConfig.objects.create(
+        name="graph_relation_binding_downgraded",
+        data_link_name="graph_relation_binding_downgraded",
+        namespace="bkmonitor",
+        bk_tenant_id="system",
+        bk_biz_id=4,
+        status=DataLinkResourceStatus.OK.value,
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM,
+        surrealdb_cluster_name="surreal-default",
+        graph_result_table_name="graph_rt",
+    )
 
-    matched_modes = set(_get_graph_definition_binding_queryset("__all__").values_list("write_mode", flat=True))
+    matched_names = set(_get_graph_definition_binding_queryset("__all__").values_list("name", flat=True))
 
-    assert matched_modes == {
-        GraphRelationBindingConfig.WRITE_MODE_SURREALDB,
-        GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
+    assert matched_names == {
+        "graph_relation_binding_2",
+        "graph_relation_binding_3",
+        "graph_relation_binding_downgraded",
     }
 
 
@@ -560,4 +574,5 @@ def test_enable_relation_surrealdb_dual_write_does_not_create_datalink_without_r
 
     enable_relation_surrealdb_dual_write(data_source, "system", 4)
 
-    assert not DataLink.objects.filter(data_link_name="4_bkcc_built_in_time_series_graph_relation").exists()
+    data_link_name = compose_bkdata_table_id("system_4_bkcc_built_in_time_series_graph_relation")
+    assert not DataLink.objects.filter(data_link_name=data_link_name).exists()

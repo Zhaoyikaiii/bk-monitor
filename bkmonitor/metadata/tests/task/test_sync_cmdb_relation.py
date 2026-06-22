@@ -102,6 +102,7 @@ def test_sync_relation_redis_data(create_and_delete_records):
         patch("metadata.models.DataSource.apply_for_data_id_from_bkdata", return_value=50011),
         patch("time.time", return_value=1733198214),
         patch("metadata.task.sync_cmdb_relation.metrics.report_all", return_value=None),
+        patch("metadata.models.DataSource.refresh_consul_config", autospec=True) as mock_refresh_consul,
         patch(
             "metadata.models.TimeSeriesGroup.create_time_series_group",
             return_value=created_group,
@@ -140,6 +141,7 @@ def test_sync_relation_redis_data(create_and_delete_records):
             ),
         ]
         assert mock_hset_to_redis.call_args_list == expected_calls
+        assert {call_args.args[0].bk_data_id for call_args in mock_refresh_consul.call_args_list} == {50010, 50011}
 
 
 def _create_relation_graph_source(bk_data_id: int, data_name: str, bk_tenant_id: str, table_id: str):
