@@ -6017,6 +6017,77 @@ def test_graph_relation_compose_uses_synced_non_default_surrealdb_cluster(create
 
 
 @pytest.mark.django_db(databases="__all__")
+def test_graph_relation_compose_preserves_existing_child_component_names(create_or_delete_records, mocker):
+    datalink, ds, rt = _prepare_bk_standard_v2_datalink()
+    datalink.data_link_strategy = DataLink.GRAPH_RELATION_TIME_SERIES
+    datalink.save(update_fields=["data_link_strategy"])
+    models.ClusterInfo.objects.create(
+        cluster_name="surreal-default",
+        cluster_type=models.ClusterInfo.TYPE_SURREALDB,
+        domain_name="default.surrealdb",
+        port=8000,
+        description="",
+        cluster_id=300001,
+        is_default_cluster=True,
+        version="2.x",
+        bk_tenant_id=datalink.bk_tenant_id,
+    )
+    generated_vmrt_name = utils.compose_bkdata_table_id(rt.table_id)
+    generated_graph_rt_name = datalink.compose_surrealdb_table_name(rt.table_id)
+    GraphRelationBindingConfig.objects.create(
+        name="rebuilt__graph_relation",
+        namespace=datalink.namespace,
+        bk_tenant_id=datalink.bk_tenant_id,
+        data_link_name=datalink.data_link_name,
+        bk_biz_id=1001,
+        table_id=rt.table_id,
+        bkbase_result_table_name="rebuilt_vm_rt",
+        graph_result_table_name="rebuilt_graph_rt",
+        vm_storage_binding_name="rebuilt_vm_binding",
+        vm_databus_name="rebuilt_vm_databus",
+        surrealdb_binding_name="rebuilt_surreal_binding",
+        graph_databus_name="rebuilt_graph_databus",
+        vm_cluster_name="vm-plat",
+        surrealdb_cluster_name="surreal-default",
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
+    )
+    mocker.patch(
+        "metadata.models.data_link.data_link.EntityMeta.auto_query_graph_definitions",
+        return_value=([{"name": "pod", "id_fields": ["pod_name"]}], [{"name": "pod_node"}]),
+    )
+    mocker.patch("metadata.models.data_link.data_link.SurrealDBStorage.create_table")
+
+    configs = datalink.compose_graph_relation_time_series_configs(
+        bk_biz_id=1001,
+        data_source=ds,
+        table_id=rt.table_id,
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB,
+    )
+
+    graph_binding = GraphRelationBindingConfig.objects.get(name="rebuilt__graph_relation")
+    assert graph_binding.bkbase_result_table_name == "rebuilt_vm_rt"
+    assert graph_binding.graph_result_table_name == "rebuilt_graph_rt"
+    assert graph_binding.vm_storage_binding_name == "rebuilt_vm_binding"
+    assert graph_binding.vm_databus_name == "rebuilt_vm_databus"
+    assert graph_binding.surrealdb_binding_name == "rebuilt_surreal_binding"
+    assert graph_binding.graph_databus_name == "rebuilt_graph_databus"
+    assert ResultTableConfig.objects.filter(name="rebuilt_vm_rt").exists()
+    assert ResultTableConfig.objects.filter(name="rebuilt_graph_rt").exists()
+    assert VMStorageBindingConfig.objects.filter(name="rebuilt_vm_binding").exists()
+    assert DataBusConfig.objects.filter(name="rebuilt_vm_databus").exists()
+    assert SurrealDBBindingConfig.objects.filter(name="rebuilt_surreal_binding").exists()
+    assert GraphDataBusConfig.objects.filter(name="rebuilt_graph_databus").exists()
+    assert not VMStorageBindingConfig.objects.filter(name=generated_vmrt_name).exists()
+    assert not DataBusConfig.objects.filter(name=generated_vmrt_name).exists()
+    assert not SurrealDBBindingConfig.objects.filter(name=generated_graph_rt_name).exists()
+    assert not GraphDataBusConfig.objects.filter(name=generated_graph_rt_name).exists()
+    assert configs[2]["metadata"]["name"] == "rebuilt_vm_databus"
+    assert configs[2]["spec"]["sinks"][0]["name"] == "rebuilt_vm_binding"
+    assert configs[5]["metadata"]["name"] == "rebuilt_graph_databus"
+    assert configs[5]["spec"]["sinks"][0]["name"] == "rebuilt_surreal_binding"
+
+
+@pytest.mark.django_db(databases="__all__")
 def test_surrealdb_create_table_switches_current_storage_cluster_record(create_or_delete_records):
     table_id = "1001_bkmonitor.graph_relation"
     for cluster_id, cluster_name in [(300001, "surreal-a"), (300002, "surreal-b")]:

@@ -489,11 +489,13 @@ class DataLink(models.Model):
     ) -> list[dict[str, Any]]:
         if not graph_binding_ins.surrealdb_cluster_name:
             raise ValueError("compose_graph_relation_surrealdb_configs: surrealdb cluster name is empty")
-        surrealdb_rt_name = self.compose_surrealdb_table_name(table_id)
+        surrealdb_rt_name = graph_binding_ins.graph_result_table_name or self.compose_surrealdb_table_name(table_id)
+        surrealdb_binding_name = graph_binding_ins.surrealdb_binding_component_name
+        graph_databus_name = graph_binding_ins.graph_databus_component_name
         surreal_sinks = [
             {
                 "kind": DataLinkKind.SURREALDBBINDING.value,
-                "name": surrealdb_rt_name,
+                "name": surrealdb_binding_name,
                 "namespace": self.namespace,
             }
         ]
@@ -523,7 +525,7 @@ class DataLink(models.Model):
                 ).cluster_id,
             )
             surrealdb_binding_ins, _ = SurrealDBBindingConfig.objects.update_or_create(
-                name=surrealdb_rt_name,
+                name=surrealdb_binding_name,
                 data_link_name=self.data_link_name,
                 namespace=self.namespace,
                 bk_biz_id=bk_biz_id,
@@ -538,7 +540,7 @@ class DataLink(models.Model):
                 },
             )
             graph_databus_ins, _ = GraphDataBusConfig.objects.update_or_create(
-                name=surrealdb_rt_name,
+                name=graph_databus_name,
                 data_id_name=utils.compose_bkdata_data_id_name(data_source.data_name),
                 data_link_name=self.data_link_name,
                 namespace=self.namespace,
@@ -546,7 +548,7 @@ class DataLink(models.Model):
                 bk_tenant_id=self.bk_tenant_id,
                 defaults={
                     "bk_data_id": data_source.bk_data_id,
-                    "sink_names": [f"{DataLinkKind.SURREALDBBINDING.value}:{surrealdb_rt_name}"],
+                    "sink_names": [f"{DataLinkKind.SURREALDBBINDING.value}:{surrealdb_binding_name}"],
                 },
             )
 
@@ -627,16 +629,34 @@ class DataLink(models.Model):
             queried_relations = existed_graph_binding.relations
         vm_cluster_name = storage_cluster_name or (existed_graph_binding.vm_cluster_name if existed_graph_binding else "")
         table_type = existed_graph_binding.table_type if existed_graph_binding else "temporary"
+        bkbase_result_table_name = (
+            existed_graph_binding.bkbase_result_table_name if existed_graph_binding else bkbase_vmrt_name
+        ) or bkbase_vmrt_name
+        graph_result_table_name = (
+            existed_graph_binding.graph_result_table_name if existed_graph_binding else surrealdb_rt_name
+        ) or surrealdb_rt_name
+        vm_storage_binding_name = (
+            existed_graph_binding.vm_binding_component_name if existed_graph_binding else bkbase_result_table_name
+        )
+        vm_databus_name = (
+            existed_graph_binding.vm_databus_component_name if existed_graph_binding else bkbase_result_table_name
+        )
+        surrealdb_binding_name = (
+            existed_graph_binding.surrealdb_binding_component_name if existed_graph_binding else graph_result_table_name
+        )
+        graph_databus_name = (
+            existed_graph_binding.graph_databus_component_name if existed_graph_binding else graph_result_table_name
+        )
         graph_binding_defaults = {
             "table_id": table_id,
             "vm_cluster_name": vm_cluster_name,
             "surrealdb_cluster_name": surrealdb_cluster_name,
-            "bkbase_result_table_name": bkbase_vmrt_name,
-            "graph_result_table_name": surrealdb_rt_name,
-            "vm_storage_binding_name": bkbase_vmrt_name,
-            "vm_databus_name": bkbase_vmrt_name,
-            "surrealdb_binding_name": surrealdb_rt_name,
-            "graph_databus_name": surrealdb_rt_name,
+            "bkbase_result_table_name": bkbase_result_table_name,
+            "graph_result_table_name": graph_result_table_name,
+            "vm_storage_binding_name": vm_storage_binding_name,
+            "vm_databus_name": vm_databus_name,
+            "surrealdb_binding_name": surrealdb_binding_name,
+            "graph_databus_name": graph_databus_name,
             "table_type": table_type,
             "vertices": queried_vertices,
             "relations": queried_relations,
@@ -673,7 +693,7 @@ class DataLink(models.Model):
                 raise ValueError("compose_graph_relation_time_series_configs: vm cluster name is empty")
             with transaction.atomic(using=DATABASE_CONNECTION_NAME):
                 vm_table_id_ins, _ = ResultTableConfig.objects.update_or_create(
-                    name=bkbase_vmrt_name,
+                    name=graph_binding_ins.bkbase_result_table_name,
                     data_link_name=self.data_link_name,
                     namespace=self.namespace,
                     bk_biz_id=bk_biz_id,
@@ -681,7 +701,7 @@ class DataLink(models.Model):
                     defaults={"table_id": table_id},
                 )
                 vm_storage_ins, _ = VMStorageBindingConfig.objects.update_or_create(
-                    name=bkbase_vmrt_name,
+                    name=graph_binding_ins.vm_binding_component_name,
                     data_link_name=self.data_link_name,
                     namespace=self.namespace,
                     bk_biz_id=bk_biz_id,
@@ -689,13 +709,13 @@ class DataLink(models.Model):
                     defaults={
                         "vm_cluster_name": vm_cluster_name,
                         "table_id": table_id,
-                        "bkbase_result_table_name": bkbase_vmrt_name,
+                        "bkbase_result_table_name": graph_binding_ins.bkbase_result_table_name,
                     },
                 )
                 sinks = [
                     {
                         "kind": DataLinkKind.VMSTORAGEBINDING.value,
-                        "name": bkbase_vmrt_name,
+                        "name": graph_binding_ins.vm_binding_component_name,
                         "namespace": settings.DEFAULT_VM_DATA_LINK_NAMESPACE,
                     }
                 ]
@@ -703,7 +723,7 @@ class DataLink(models.Model):
                     sinks[0]["tenant"] = self.bk_tenant_id
 
                 data_bus_ins, _ = DataBusConfig.objects.update_or_create(
-                    name=bkbase_vmrt_name,
+                    name=graph_binding_ins.vm_databus_component_name,
                     data_id_name=bkbase_data_name,
                     data_link_name=self.data_link_name,
                     namespace=self.namespace,
@@ -711,7 +731,9 @@ class DataLink(models.Model):
                     bk_tenant_id=self.bk_tenant_id,
                     defaults={
                         "bk_data_id": data_source.bk_data_id,
-                        "sink_names": [f"{DataLinkKind.VMSTORAGEBINDING.value}:{bkbase_vmrt_name}"],
+                        "sink_names": [
+                            f"{DataLinkKind.VMSTORAGEBINDING.value}:{graph_binding_ins.vm_binding_component_name}"
+                        ],
                     },
                 )
             configs.extend(
