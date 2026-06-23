@@ -124,13 +124,13 @@ def _get_data_source_and_table_id(graph_binding: GraphRelationBindingConfig) -> 
 
 
 def _graph_definitions_changed(graph_binding: GraphRelationBindingConfig, vertices: list, relations: list) -> bool:
+    if not graph_binding.should_write_surrealdb:
+        return False
+
     if _canonical_graph_definitions(graph_binding.vertices) != _canonical_graph_definitions(
         vertices
     ) or _canonical_graph_definitions(graph_binding.relations) != _canonical_graph_definitions(relations):
         return True
-
-    if not graph_binding.should_write_surrealdb:
-        return False
 
     if not graph_binding.graph_result_table_name:
         return True
@@ -703,7 +703,7 @@ def sync_relation_redis_data():
                 generated_token = transform_data_id_to_token(
                     metric_data_id=ds.bk_data_id, bk_biz_id=biz_id, app_name=data_name
                 )
-                time_series_group = existing_time_series_groups_dict.get((bk_tenant_id, table_id)) or ts_group
+                time_series_group = existing_time_series_groups_dict.get((bk_tenant_id, table_id))
                 builtin_token = _get_builtin_relation_token(ds, table_id, generated_token, time_series_group)
                 # 兼容历史问题，如果DB中存储的Token和实际采集校验 Token 不一致，更新之
                 if ds.token != builtin_token:
@@ -766,12 +766,13 @@ def sync_relation_redis_data():
                         },
                         bk_tenant_id=bk_tenant_id,
                     )
+                    existing_time_series_groups_dict[(bk_tenant_id, table_id)] = ts_group
                 generated_token = transform_data_id_to_token(
                     metric_data_id=ds.bk_data_id,
                     bk_biz_id=biz_id,
                     app_name=data_name,
                 )
-                time_series_group = existing_time_series_groups_dict.get((bk_tenant_id, table_id))
+                time_series_group = ts_group
                 builtin_token = _get_builtin_relation_token(ds, table_id, generated_token, time_series_group)
                 if ds.token != builtin_token:
                     ds.token = builtin_token

@@ -180,6 +180,61 @@ def test_sync_relation_redis_data_uses_existing_time_series_group_token(create_a
     assert [call_args.args[0].bk_data_id for call_args in mock_refresh_consul.call_args_list] == [50010]
 
 
+@pytest.mark.django_db(databases="__all__")
+def test_sync_relation_redis_data_existing_rt_without_group_uses_generated_token(create_and_delete_records, mocker):
+    redis_data = {b"bkcc__2": b'{"token":"testtokenxxxxxx","modifyTime":"1733132051"}'}
+    with (
+        patch("metadata.utils.redis_tools.RedisTools.hgetall", return_value=redis_data),
+        patch("metadata.utils.redis_tools.RedisTools.hset_to_redis", return_value=0) as mock_hset_to_redis,
+        patch("time.time", return_value=1733198214),
+        patch("metadata.task.sync_cmdb_relation.metrics.report_all", return_value=None),
+        patch("metadata.models.DataSource.refresh_consul_config", autospec=True) as mock_refresh_consul,
+    ):
+        token_spy = mocker.spy(sync_cmdb_relation, "_get_builtin_relation_token")
+        sync_relation_redis_data()
+
+    expected_token = transform_data_id_to_token(
+        metric_data_id=50010, bk_biz_id=2, app_name="2_bkcc_built_in_time_series"
+    )
+    builtin_ds = models.DataSource.objects.get(bk_data_id=50010)
+    assert builtin_ds.token == expected_token
+    token_spy.assert_called_once()
+    assert token_spy.call_args.args[3] is None
+    mock_hset_to_redis.assert_called_once_with(
+        f"{settings.BUILTIN_DATA_RT_REDIS_KEY}",
+        "bkcc__2",
+        f'{{"token":"{expected_token}","modifyTime":"1733198214"}}',
+    )
+    assert [call_args.args[0].bk_data_id for call_args in mock_refresh_consul.call_args_list] == [50010]
+
+
+@pytest.mark.django_db(databases="__all__")
+def test_sync_relation_redis_data_new_rt_uses_created_group_token(create_and_delete_records, mocker):
+    redis_data = {b"bkcc__3": b'{"token":""}'}
+    created_group = Mock(token="created-group-token", last_modify_time=datetime.fromtimestamp(1733198214, tz=timezone.utc))
+    with (
+        patch("metadata.utils.redis_tools.RedisTools.hgetall", return_value=redis_data),
+        patch("metadata.utils.redis_tools.RedisTools.hset_to_redis", return_value=0) as mock_hset_to_redis,
+        patch("metadata.models.DataSource.apply_for_data_id_from_bkdata", return_value=50011),
+        patch("metadata.task.sync_cmdb_relation.metrics.report_all", return_value=None),
+        patch("metadata.models.DataSource.refresh_consul_config", autospec=True) as mock_refresh_consul,
+        patch("metadata.models.TimeSeriesGroup.create_time_series_group", return_value=created_group),
+    ):
+        token_spy = mocker.spy(sync_cmdb_relation, "_get_builtin_relation_token")
+        sync_relation_redis_data()
+
+    builtin_ds = models.DataSource.objects.get(bk_data_id=50011)
+    assert builtin_ds.token == "created-group-token"
+    token_spy.assert_called_once()
+    assert token_spy.call_args.args[3] is created_group
+    mock_hset_to_redis.assert_called_once_with(
+        f"{settings.BUILTIN_DATA_RT_REDIS_KEY}",
+        "bkcc__3",
+        '{"token":"created-group-token","modifyTime":1733198214}',
+    )
+    assert [call_args.args[0].bk_data_id for call_args in mock_refresh_consul.call_args_list] == [50011]
+
+
 def _create_relation_graph_source(bk_data_id: int, data_name: str, bk_tenant_id: str, table_id: str):
     ds = models.DataSource.objects.create(
         bk_data_id=bk_data_id,
@@ -315,6 +370,27 @@ def test_graph_definitions_changed_uses_stored_surrealdb_binding_name():
     )
 
     assert not _graph_definitions_changed(graph_binding, graph_binding.vertices, graph_binding.relations)
+
+
+@pytest.mark.django_db(databases="__all__")
+def test_graph_definitions_changed_skips_vm_only_definition_diff():
+    graph_binding = models.GraphRelationBindingConfig.objects.create(
+        name="graph_binding",
+        data_link_name="graph_link",
+        namespace=settings.DEFAULT_VM_DATA_LINK_NAMESPACE,
+        bk_tenant_id="system",
+        bk_biz_id=2,
+        table_id="2_bkcc_built_in_time_series.__default__",
+        graph_result_table_name="graph_rt",
+        surrealdb_binding_name="historical_surreal_binding",
+        vertices=[{"name": "pod", "id_fields": ["pod_name"]}],
+        relations=[{"name": "pod_node", "from": "pod", "to": "node"}],
+        write_mode=models.GraphRelationBindingConfig.WRITE_MODE_VM,
+    )
+
+    changed_vertices = [{"name": "service", "id_fields": ["bk_service_id"]}]
+    changed_relations = [{"name": "service_module", "from": "service", "to": "module"}]
+    assert not _graph_definitions_changed(graph_binding, changed_vertices, changed_relations)
 
 
 @pytest.mark.django_db(databases="__all__")
