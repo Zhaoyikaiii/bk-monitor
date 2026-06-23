@@ -1222,7 +1222,7 @@ def rebuild_databus_relation(databus: DataBusConfig, dry_run: bool = True) -> Da
             GraphRelationBindingConfig.objects.update_or_create(
                 **graph_binding_lookup,
                 defaults={
-                    "name": data_link_name,
+                    "name": getattr(existing_graph_binding, "name", data_link_name),
                     "data_link_name": data_link_name,
                     "namespace": databus.namespace,
                     "bk_tenant_id": databus.bk_tenant_id,

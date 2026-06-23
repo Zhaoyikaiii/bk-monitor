@@ -140,14 +140,22 @@ def _graph_definitions_changed(graph_binding: GraphRelationBindingConfig, vertic
         "namespace": graph_binding.namespace,
         "data_link_name": graph_binding.data_link_name,
     }
+    surrealdb_binding = SurrealDBBindingConfig.objects.filter(
+        **common_filters,
+        name=graph_binding.surrealdb_binding_component_name,
+    ).first()
+    if not surrealdb_binding:
+        return True
+
+    if _canonical_graph_definitions(surrealdb_binding.vertices) != _canonical_graph_definitions(
+        vertices
+    ) or _canonical_graph_definitions(surrealdb_binding.relations) != _canonical_graph_definitions(relations):
+        return True
+
     return not (
         ResultTableConfig.objects.filter(
             **common_filters,
             name=graph_binding.graph_result_table_name,
-        ).exists()
-        and SurrealDBBindingConfig.objects.filter(
-            **common_filters,
-            name=graph_binding.surrealdb_binding_component_name,
         ).exists()
         and GraphDataBusConfig.objects.filter(
             **common_filters,

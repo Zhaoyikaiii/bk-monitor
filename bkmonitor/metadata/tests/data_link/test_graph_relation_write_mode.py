@@ -273,9 +273,10 @@ def test_enable_relation_surrealdb_dual_write_persists_write_mode_transition(moc
     enable_relation_surrealdb_dual_write(data_source, "system", 8)
 
     binding = GraphRelationBindingConfig.objects.get(data_link_name=data_link_name)
-    assert binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM
+    assert binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
     mock_apply.assert_called_once()
     assert mock_apply.call_args.kwargs["write_mode"] == GraphRelationBindingConfig.WRITE_MODE_VM
+    assert mock_apply.call_args.kwargs["persist_graph_write_mode"] is False
 
 
 def test_enable_relation_surrealdb_dual_write_preserves_existing_write_mode(mocker):

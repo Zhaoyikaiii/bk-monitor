@@ -3761,6 +3761,7 @@ def test_rebuild_graph_relation_merges_siblings_without_prefilled_table_id():
 
     graph_binding = GraphRelationBindingConfig.objects.get()
     assert graph_binding.pk == orphan_graph_binding.pk
+    assert graph_binding.name == "orphan_graph_binding"
     assert graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
     assert graph_binding.bkbase_result_table_name == "graph_vm_rt"
     assert graph_binding.graph_result_table_name == "graph_surreal_rt"
