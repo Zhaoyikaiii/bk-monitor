@@ -165,6 +165,18 @@ def _graph_definitions_changed(graph_binding: GraphRelationBindingConfig, vertic
 
 
 def _graph_definition_sync_write_mode(graph_binding: GraphRelationBindingConfig) -> str:
+    if (
+        graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM
+        and graph_binding.surrealdb_cluster_name
+        and graph_binding.graph_result_table_name
+        and not SurrealDBBindingConfig.objects.filter(
+            bk_tenant_id=graph_binding.bk_tenant_id,
+            namespace=graph_binding.namespace,
+            data_link_name=graph_binding.data_link_name,
+            name=graph_binding.surrealdb_binding_component_name,
+        ).exists()
+    ):
+        return GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
     return graph_binding.write_mode
 
 
