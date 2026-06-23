@@ -289,7 +289,7 @@ def sync_graph_definition_to_bkbase(
                         table_id=table_id,
                         storage_cluster_name=graph_binding.vm_cluster_name,
                         write_mode=GraphRelationBindingConfig.WRITE_MODE_VM,
-                        persist_graph_write_mode=False,
+                        persist_graph_write_mode=True,
                     )
                     result["applied"] += 1
                     logger.warning(
