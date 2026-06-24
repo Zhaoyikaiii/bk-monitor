@@ -167,6 +167,7 @@ def _graph_definitions_changed(graph_binding: GraphRelationBindingConfig, vertic
 def _graph_definition_sync_write_mode(graph_binding: GraphRelationBindingConfig) -> str:
     if (
         graph_binding.write_mode == GraphRelationBindingConfig.WRITE_MODE_VM
+        and graph_binding.surrealdb_auto_restore
         and graph_binding.surrealdb_cluster_name
         and graph_binding.graph_result_table_name
         and not SurrealDBBindingConfig.objects.filter(
@@ -310,6 +311,7 @@ def sync_graph_definition_to_bkbase(
                         storage_cluster_name=graph_binding.vm_cluster_name,
                         write_mode=GraphRelationBindingConfig.WRITE_MODE_VM,
                         persist_graph_write_mode=True,
+                        surrealdb_auto_restore=True,
                     )
                     result["applied"] += 1
                     logger.warning(

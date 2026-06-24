@@ -612,6 +612,7 @@ class GraphRelationBindingConfig(DataLinkResourceConfigBase):
     table_type = models.CharField(verbose_name="图表类型", max_length=32, default="temporary")
     vertices = models.JSONField(verbose_name="顶点定义", default=list)
     relations = models.JSONField(verbose_name="关系定义", default=list)
+    surrealdb_auto_restore = models.BooleanField(verbose_name="SurrealDB自动恢复写入", default=False)
 
     class Meta:
         verbose_name = "图关系绑定配置"

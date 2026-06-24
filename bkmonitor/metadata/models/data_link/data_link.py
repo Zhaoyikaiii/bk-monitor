@@ -569,6 +569,7 @@ class DataLink(models.Model):
         storage_cluster_name: str = "",
         write_mode: str | None = None,
         persist_write_mode: bool = True,
+        surrealdb_auto_restore: bool = False,
     ) -> list[dict[str, Any]]:
         """
         生成图关系时序链路配置。
@@ -676,6 +677,11 @@ class DataLink(models.Model):
             "table_type": table_type,
             "vertices": graph_vertices,
             "relations": graph_relations,
+            "surrealdb_auto_restore": (
+                bool(surrealdb_auto_restore)
+                and effective_write_mode == GraphRelationBindingConfig.WRITE_MODE_VM
+                and persist_write_mode
+            ),
         }
         cleanup_graph_binding = existed_graph_binding
         cleanup_write_mode = (

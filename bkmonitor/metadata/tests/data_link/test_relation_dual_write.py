@@ -599,6 +599,7 @@ def test_sync_graph_definition_downgrades_dual_write_empty_definitions_to_vm(moc
     mock_apply.assert_called_once()
     assert mock_apply.call_args.kwargs["write_mode"] == GraphRelationBindingConfig.WRITE_MODE_VM
     assert mock_apply.call_args.kwargs["persist_graph_write_mode"] is True
+    assert mock_apply.call_args.kwargs["surrealdb_auto_restore"] is True
 
 
 def test_sync_graph_definition_skips_vm_only_empty_definitions(mocker):
@@ -747,6 +748,7 @@ def test_sync_graph_definition_promotes_auto_downgraded_vm_binding_when_definiti
         bkbase_result_table_name="2_bkcc_built_in_time_series",
         graph_result_table_name=graph_table_name,
         write_mode=GraphRelationBindingConfig.WRITE_MODE_VM,
+        surrealdb_auto_restore=True,
         status=DataLinkResourceStatus.OK.value,
         vertices=vertices,
         relations=relations,
@@ -783,6 +785,78 @@ def test_sync_graph_definition_promotes_auto_downgraded_vm_binding_when_definiti
     assert result["applied"] == 1
     assert result["skipped"] == 0
     assert mock_apply.call_args.kwargs["write_mode"] == GraphRelationBindingConfig.WRITE_MODE_VM_AND_SURREALDB
+
+
+def test_sync_graph_definition_keeps_explicit_vm_only_binding_with_historical_graph_fields(mocker):
+    table_id = "2_bkcc_built_in_time_series.__default__"
+    graph_table_name = DataLink.compose_surrealdb_table_name(table_id)
+    vertices = [{"name": "pod", "id_fields": ["pod_name"]}]
+    relations = [{"name": "pod_node", "from": "pod", "to": "node"}]
+    data_source = create_graph_relation_data_source()
+    models.DataSourceResultTable.objects.create(
+        bk_data_id=data_source.bk_data_id,
+        table_id=table_id,
+        bk_tenant_id=data_source.bk_tenant_id,
+        creator="system",
+    )
+    data_link = DataLink.objects.create(
+        bk_tenant_id="system",
+        data_link_name="bkm_relation_explicit_vm_with_graph_fields",
+        namespace="bkmonitor",
+        data_link_strategy=DataLink.GRAPH_RELATION_TIME_SERIES,
+        bk_data_id=data_source.bk_data_id,
+        table_ids=[table_id],
+    )
+    GraphRelationBindingConfig.objects.create(
+        name=data_link.data_link_name,
+        data_link_name=data_link.data_link_name,
+        namespace=data_link.namespace,
+        bk_tenant_id=data_link.bk_tenant_id,
+        bk_biz_id=2,
+        table_id=table_id,
+        vm_cluster_name="vm-default",
+        surrealdb_cluster_name="surreal-default",
+        bkbase_result_table_name="2_bkcc_built_in_time_series",
+        graph_result_table_name=graph_table_name,
+        write_mode=GraphRelationBindingConfig.WRITE_MODE_VM,
+        surrealdb_auto_restore=False,
+        status=DataLinkResourceStatus.OK.value,
+        vertices=vertices,
+        relations=relations,
+    )
+    ResultTableConfig.objects.create(
+        name="2_bkcc_built_in_time_series",
+        data_link_name=data_link.data_link_name,
+        namespace=data_link.namespace,
+        bk_tenant_id=data_link.bk_tenant_id,
+        bk_biz_id=2,
+        table_id=table_id,
+        status=DataLinkResourceStatus.OK.value,
+    )
+    DataBusConfig.objects.create(
+        name="2_bkcc_built_in_time_series",
+        data_link_name=data_link.data_link_name,
+        namespace=data_link.namespace,
+        bk_tenant_id=data_link.bk_tenant_id,
+        bk_biz_id=2,
+        status=DataLinkResourceStatus.OK.value,
+    )
+    mocker.patch(
+        "metadata.task.sync_cmdb_relation.EntityMeta.auto_query_graph_definitions",
+        return_value=(vertices, relations),
+    )
+    mock_apply = mocker.patch.object(DataLink, "apply_data_link")
+
+    from metadata.models.entity_relation import NAMESPACE_ALL
+    from metadata.task.sync_cmdb_relation import sync_graph_definition_to_bkbase
+
+    result = sync_graph_definition_to_bkbase(namespace=NAMESPACE_ALL, action="apply")
+
+    assert result["matched"] == 1
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["failed"] == 0
+    mock_apply.assert_not_called()
 
 
 def test_sync_graph_definition_treats_fallback_vm_databus_name_as_healthy(mocker):
