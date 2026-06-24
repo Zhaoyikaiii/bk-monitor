@@ -941,6 +941,7 @@ def test_sync_graph_definition_treats_fallback_vm_databus_name_as_healthy(mocker
         namespace=data_link.namespace,
         bk_tenant_id=data_link.bk_tenant_id,
         bk_biz_id=2,
+        sink_names=[f"SurrealDBBinding:{graph_table_name}"],
         status=DataLinkResourceStatus.OK.value,
     )
     mocker.patch(

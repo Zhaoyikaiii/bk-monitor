@@ -184,8 +184,6 @@ def _graph_definition_sync_write_mode(graph_binding: GraphRelationBindingConfig)
 def _graph_relation_binding_sync_healthy(graph_binding: GraphRelationBindingConfig) -> bool:
     if graph_binding.status == DataLinkResourceStatus.FAILED.value:
         return False
-    if graph_binding.component_status != DataLinkResourceStatus.OK.value:
-        return False
 
     common_filters = {
         "bk_tenant_id": graph_binding.bk_tenant_id,
