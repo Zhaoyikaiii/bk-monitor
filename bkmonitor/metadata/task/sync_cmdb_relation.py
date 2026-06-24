@@ -40,6 +40,7 @@ from metadata.models.data_link.data_link_configs import (
     GraphRelationBindingConfig,
     ResultTableConfig,
     SurrealDBBindingConfig,
+    VMStorageBindingConfig,
 )
 from metadata.models.data_link.utils import compose_bkdata_table_id
 from metadata.models.entity_relation import EntityMeta, NAMESPACE_ALL
@@ -195,6 +196,7 @@ def _graph_relation_binding_sync_healthy(graph_binding: GraphRelationBindingConf
         component_checks.extend(
             [
                 (ResultTableConfig, graph_binding.bkbase_result_table_name),
+                (VMStorageBindingConfig, graph_binding.vm_binding_component_name),
                 (DataBusConfig, graph_binding.vm_databus_component_name),
             ]
         )
