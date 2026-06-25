@@ -412,7 +412,7 @@ ADVANCED_OPTIONS = OrderedDict(
         ("ENABLE_SYNC_BKBASE_METADATA_TO_DB", slz.BooleanField(label="是否同步bkbase元数据至DB", default=False)),
         (
             "ENABLE_SYNC_GRAPH_DEFINITION_TO_BKBASE",
-            slz.BooleanField(label="是否在图实体定义变更后自动同步计算平台图链路", default=False),
+            slz.BooleanField(label="是否自动同步计算平台图关系链路", default=False),
         ),
         (
             "ACCESS_DATA_BATCH_PROCESS_THRESHOLD",

@@ -482,6 +482,11 @@ def _enable_relation_surrealdb_dual_write_best_effort(ds: DataSource, bk_tenant_
         )
 
 
+def _is_relation_surrealdb_dual_write_enabled() -> bool:
+    # 内置关系周期路径和图定义变更路径共用同一个 rollout 开关，保持默认关闭语义一致。
+    return getattr(settings, "ENABLE_SYNC_GRAPH_DEFINITION_TO_BKBASE", False)
+
+
 def enable_relation_surrealdb_dual_write(ds: DataSource, bk_tenant_id: str, bk_biz_id: int) -> None:
     table_ids = list(
         DataSourceResultTable.objects.filter(bk_data_id=ds.bk_data_id, bk_tenant_id=bk_tenant_id).values_list(
@@ -678,6 +683,7 @@ def sync_relation_redis_data():
     existing_time_series_groups_dict = {
         (group.bk_tenant_id, group.table_id): group for group in existing_time_series_groups
     }
+    enable_graph_dual_write = _is_relation_surrealdb_dual_write_enabled()
     for field, value in redis_data.items():
         try:
             # 将json解析放在try中，确保value是有效的JSON字符串
@@ -744,7 +750,8 @@ def sync_relation_redis_data():
                 value_dict["token"] = builtin_token
                 value_dict["modifyTime"] = new_modify_time
                 RedisTools.hset_to_redis(redis_key, key, json.dumps(value_dict))
-                _enable_relation_surrealdb_dual_write_best_effort(ds, bk_tenant_id, biz_id)
+                if enable_graph_dual_write:
+                    _enable_relation_surrealdb_dual_write_best_effort(ds, bk_tenant_id, biz_id)
                 logger.info(
                     "sync_relation_redis_data: Update Data For Field->[%s],has completed,value->[%s]", key, value_dict
                 )
@@ -804,7 +811,8 @@ def sync_relation_redis_data():
                 value_dict["token"] = builtin_token
                 value_dict["modifyTime"] = int(ts_group.last_modify_time.timestamp())
                 RedisTools.hset_to_redis(redis_key, key, json.dumps(value_dict))
-                _enable_relation_surrealdb_dual_write_best_effort(ds, bk_tenant_id, biz_id)
+                if enable_graph_dual_write:
+                    _enable_relation_surrealdb_dual_write_best_effort(ds, bk_tenant_id, biz_id)
                 logger.info(
                     "sync_relation_redis_data: Create Data For Field->[%s],has completed,value->[%s]",
                     key,
